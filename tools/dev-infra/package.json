@@ -12,6 +12,7 @@
   },
   "dependencies": {
     "@azure/storage-blob": "^12.34.0",
+    "@spatial/config": "workspace:*",
     "ioredis": "^5.11.1",
     "nodemailer": "^10.0.12",
     "pg": "^8.23.0"

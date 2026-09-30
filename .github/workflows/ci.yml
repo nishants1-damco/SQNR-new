@@ -14,7 +14,7 @@ env:
 
 jobs:
   checks:
-    name: Format, lint, typecheck, test, build
+    name: Format, lint, typecheck, unit tests, build
     runs-on: ubuntu-latest
     steps:
       - uses: actions/checkout@v4
@@ -27,8 +27,8 @@ jobs:
       - run: pnpm format:check
       - run: pnpm check
 
-  infra:
-    name: Local stack (Docker Compose)
+  integration:
+    name: Local stack + integration tests
     runs-on: ubuntu-latest
     steps:
       - uses: actions/checkout@v4
@@ -38,8 +38,13 @@ jobs:
           node-version-file: .nvmrc
           cache: pnpm
       - run: pnpm install --frozen-lockfile
+      - run: pnpm build
       - run: pnpm infra:up
       - run: pnpm infra:check
+      # Migrations against the development database, as a developer would run them.
+      - run: pnpm db:migrate
+      # packages/db and apps/api: throwaway databases, real Redis and Mailpit.
+      - run: pnpm test:integration
       - name: Service logs
         if: failure()
         run: pnpm infra:logs
