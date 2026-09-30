@@ -1,0 +1,19 @@
+{
+  "id": "sample-bedroom-1",
+  "label": "3.5m x 3m x 2.4m bedroom with two doors",
+  "ground_truth": {
+    "width_m": 3.5,
+    "length_m": 3.0,
+    "height_m": 2.4,
+    "objects": [{ "label": "Queen bed", "category": "seating", "width_m": 1.52 }],
+    "portals": [
+      { "kind": "door", "wall": "west", "width_m": 0.813 },
+      { "kind": "door", "wall": "south", "width_m": 0.813 }
+    ]
+  },
+  "tolerance": {
+    "shell_m": 0.15,
+    "object_width_m": 0.2,
+    "portal_width_m": 0.05
+  }
+}

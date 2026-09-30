@@ -1,0 +1,20 @@
+{
+  "id": "sample-living-room-1",
+  "label": "3m x 4m x 2.5m rectangular living room",
+  "notes": "Sample ground truth for the reconstruction eval: a hand-measured room. Add more as we get real captures from beta users (with permission).",
+  "ground_truth": {
+    "width_m": 3.0,
+    "length_m": 4.0,
+    "height_m": 2.5,
+    "objects": [
+      { "label": "TV", "category": "tv", "width_m": 1.22 },
+      { "label": "Sofa", "category": "seating", "width_m": 2.1 }
+    ],
+    "portals": [{ "kind": "door", "wall": "north", "width_m": 0.914 }]
+  },
+  "tolerance": {
+    "shell_m": 0.15,
+    "object_width_m": 0.2,
+    "portal_width_m": 0.05
+  }
+}

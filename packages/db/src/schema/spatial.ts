@@ -1,4 +1,4 @@
-// Mirrors migrations/0002_spatial.sql. The SQL is the source of truth; the
+// Mirrors migrations/0002_spatial.sql, 0004 and 0005. The SQL is the source of truth; the
 // drift test (schema.int.test.ts) fails if the two disagree. Numeric columns
 // come back as strings (node-postgres keeps full precision); convert at the
 // edge where a number is needed.
@@ -9,6 +9,7 @@ import {
   jsonb,
   numeric,
   pgTable,
+  primaryKey,
   smallint,
   text,
   uuid,
@@ -193,7 +194,9 @@ export const scanAnalyses = pgTable("scan_analyses", {
   provider: text("provider").notNull(),
   modelVersion: text("model_version").notNull(),
   promptVersion: text("prompt_version").notNull(),
-  status: text("status", { enum: ["running", "succeeded", "failed", "timed_out"] }).notNull(),
+  status: text("status", {
+    enum: ["queued", "running", "succeeded", "failed", "timed_out"],
+  }).notNull(),
   startedAt: timestamptz("started_at").notNull().defaultNow(),
   finishedAt: timestamptz("finished_at"),
   durationMs: integer("duration_ms"),
@@ -205,7 +208,22 @@ export const scanAnalyses = pgTable("scan_analyses", {
   errorMessage: text("error_message"),
   metrics: json("metrics"),
   createdAt: created(),
+  attempts: integer("attempts").notNull().default(0),
 });
+
+/** Stage outputs of an analysis run (0005_analysis_runs.sql). */
+export const analysisCheckpoints = pgTable(
+  "analysis_checkpoints",
+  {
+    analysisId: uuid("analysis_id")
+      .notNull()
+      .references(() => scanAnalyses.id, { onDelete: "cascade" }),
+    stage: text("stage").notNull(),
+    payload: jsonb("payload").$type<unknown>().notNull(),
+    createdAt: created(),
+  },
+  (t) => [primaryKey({ columns: [t.analysisId, t.stage] })],
+);
 
 export const featureFlags = pgTable("feature_flags", {
   id: uuid("id").primaryKey().defaultRandom(),

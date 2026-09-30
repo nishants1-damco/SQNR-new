@@ -23,6 +23,14 @@ export const QUOTAS = {
   uploadSession: { bucket: "upload_session", windowMs: HOUR, max: 120 },
   /** Geocoding calls a third-party service with its own usage policy. */
   geocode: { bucket: "geocode", windowMs: HOUR, max: 60 },
+  /**
+   * At roughly $5 of Claude Opus 5.5 per scan, the original 30 an hour let one
+   * account spend ~$150 an hour (plan §9.7.6): 5 an hour and 20 a day.
+   */
+  analyzeScanHourly: { bucket: "analyze_scan", windowMs: HOUR, max: 5 },
+  analyzeScanDaily: { bucket: "analyze_scan_day", windowMs: 24 * HOUR, max: 20 },
+  /** One frame set re-screened per sweep, about $0.60. */
+  purgePeople: { bucket: "purge_people", windowMs: HOUR, max: 10 },
 } as const satisfies Record<string, QuotaPolicy>;
 
 @Injectable()

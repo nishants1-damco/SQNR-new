@@ -5,6 +5,7 @@ import { APP_FILTER, APP_INTERCEPTOR, APP_PIPE } from "@nestjs/core";
 import type { ApiConfig } from "@spatial/config";
 import { LoggerModule } from "nestjs-pino";
 import { createZodValidationPipe, ZodSerializerInterceptor } from "nestjs-zod";
+import { AnalysisModule } from "./analysis/analysis.module";
 import { AuthModule } from "./auth/auth.module";
 import { ApiExceptionFilter } from "./common/api-exception.filter";
 import { ConfigModule } from "./config/config.module";
@@ -76,6 +77,7 @@ export class AppModule {
         HealthModule,
         AuthModule,
         SpacesModule,
+        AnalysisModule,
       ],
       providers: [
         { provide: APP_PIPE, useClass: AppValidationPipe },

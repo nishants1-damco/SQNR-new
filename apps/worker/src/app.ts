@@ -3,11 +3,14 @@ import { type INestApplicationContext } from "@nestjs/common";
 import { NestFactory } from "@nestjs/core";
 import type { WorkerConfig } from "@spatial/config";
 import { Logger } from "nestjs-pino";
-import { WorkerModule } from "./worker.module";
+import { WorkerModule, type WorkerOverrides } from "./worker.module";
 
 /** The worker as a Nest application context: no HTTP server, just providers and their lifecycles. */
-export async function createWorker(config: WorkerConfig): Promise<INestApplicationContext> {
-  const app = await NestFactory.createApplicationContext(WorkerModule.forRoot(config), {
+export async function createWorker(
+  config: WorkerConfig,
+  overrides: WorkerOverrides = {},
+): Promise<INestApplicationContext> {
+  const app = await NestFactory.createApplicationContext(WorkerModule.forRoot(config, overrides), {
     bufferLogs: true,
   });
   app.useLogger(app.get(Logger));

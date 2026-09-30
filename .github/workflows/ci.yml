@@ -43,8 +43,12 @@ jobs:
       - run: pnpm infra:check
       # Migrations against the development database, as a developer would run them.
       - run: pnpm db:migrate
-      # packages/db and apps/api: throwaway databases, real Redis and Mailpit.
+      # Throwaway databases, real Redis, Azurite and Mailpit; a scripted model
+      # stands in for Claude.
       - run: pnpm test:integration
+      # Scores the fixtures and replays recorded captures through the pipeline
+      # (no model calls, no API key). Live runs are manual: pnpm eval --provider claude.
+      - run: pnpm eval
       - name: Service logs
         if: failure()
         run: pnpm infra:logs

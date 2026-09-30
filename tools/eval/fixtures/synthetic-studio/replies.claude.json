@@ -1,0 +1,19 @@
+{
+  "people-screen": [{ "reply": "{\"frames_with_people\":[]}" }],
+  "inventory": [
+    {
+      "reply": "{\"objects\":[{\"label\":\"Desk\",\"category\":\"table\",\"confidence\":0.9,\"x_m\":0,\"y_m\":1.6,\"width_m\":1.4,\"depth_m\":0.7,\"height_m\":0.75,\"material\":\"wood\",\"against_wall\":\"north\",\"yaw_deg\":180,\"wall_offset_m\":1.75,\"supporting_headings_deg\":[0],\"floor_elevation_m\":0,\"relative_to\":null,\"spatial_relation\":\"none\",\"frame_boxes\":[]}]}"
+    }
+  ],
+  "landmarks": [{ "reply": "{\"sightings\":[]}" }],
+  "reconstruction": [
+    {
+      "reply": "{\"name\":\"Studio\",\"summary\":\"A small studio with a desk against the north wall.\",\"width_m\":3.5,\"length_m\":4,\"height_m\":2.5,\"scale_reference\":\"door leaf\",\"dimension_confidence\":{\"width\":0.7,\"length\":0.7,\"height\":0.8,\"overall\":0.7,\"basis\":\"door\"},\"wall_evidence\":[],\"objects\":[{\"label\":\"Desk\",\"category\":\"table\",\"confidence\":0.9,\"x_m\":0,\"y_m\":1.6,\"width_m\":1.4,\"depth_m\":0.7,\"height_m\":0.75,\"material\":\"wood\",\"against_wall\":\"north\",\"yaw_deg\":180,\"wall_offset_m\":1.75,\"supporting_headings_deg\":[0],\"floor_elevation_m\":0,\"relative_to\":null,\"spatial_relation\":\"none\"}],\"surfaces\":[],\"portals\":[{\"kind\":\"door\",\"wall\":\"east\",\"offset_m\":1,\"width_m\":0.9,\"height_m\":2.03,\"sill_m\":0,\"confidence\":0.9,\"notes\":\"\"}]}"
+    }
+  ],
+  "review": [
+    {
+      "reply": "{\"name\":\"Studio\",\"summary\":\"A small studio with a desk against the north wall.\",\"width_m\":3.5,\"length_m\":4,\"height_m\":2.5,\"scale_reference\":\"door leaf\",\"dimension_confidence\":{\"width\":0.7,\"length\":0.7,\"height\":0.8,\"overall\":0.7,\"basis\":\"door\"},\"wall_evidence\":[],\"objects\":[{\"label\":\"Desk\",\"category\":\"table\",\"confidence\":0.9,\"x_m\":0,\"y_m\":1.6,\"width_m\":1.4,\"depth_m\":0.7,\"height_m\":0.75,\"material\":\"wood\",\"against_wall\":\"north\",\"yaw_deg\":180,\"wall_offset_m\":1.75,\"supporting_headings_deg\":[0],\"floor_elevation_m\":0,\"relative_to\":null,\"spatial_relation\":\"none\"}],\"surfaces\":[],\"portals\":[{\"kind\":\"door\",\"wall\":\"east\",\"offset_m\":1,\"width_m\":0.9,\"height_m\":2.03,\"sill_m\":0,\"confidence\":0.9,\"notes\":\"\"}],\"revision_notes\":[\"No changes needed.\"]}"
+    }
+  ]
+}

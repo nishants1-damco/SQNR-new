@@ -3,3 +3,6 @@ dist
 coverage
 .turbo
 pnpm-lock.yaml
+# Prompt text is model input: formatting it changes what the model reads.
+packages/pipeline/prompts/*.md
+!packages/pipeline/prompts/README.md

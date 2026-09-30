@@ -19,6 +19,7 @@
     "db:migrate": "turbo run build --filter=@spatial/db^... && pnpm --filter @spatial/db run migrate",
     "db:status": "turbo run build --filter=@spatial/db^... && pnpm --filter @spatial/db run status",
     "db:seed": "turbo run build --filter=@spatial/api && pnpm --filter @spatial/api run seed",
+    "eval": "turbo run build --filter=@spatial/eval^... && pnpm --filter @spatial/eval run eval",
     "infra:up": "docker compose -f infra/docker/docker-compose.yml up -d --build --wait && turbo run build --filter=@spatial/dev-infra^... && pnpm --filter @spatial/dev-infra run init",
     "infra:down": "docker compose -f infra/docker/docker-compose.yml down",
     "infra:reset": "docker compose -f infra/docker/docker-compose.yml down --volumes",

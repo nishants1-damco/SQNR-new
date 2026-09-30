@@ -4,7 +4,7 @@
 
 |              |                                                                                                                                    |
 | ------------ | ---------------------------------------------------------------------------------------------------------------------------------- |
-| Status       | Draft v3 (decisions D1–D14 in §20). Phases 0–2 built; see the repository README                                                    |
+| Status       | Draft v3 (decisions D1–D14 in §20). Phases 0–3 built; see the repository README                                                    |
 | Date         | 2026-09-30                                                                                                                         |
 | Scope        | Re-platform Spatial Capture from TanStack Start + Supabase to a separated frontend and backend that can serve ~1M registered users |
 | Out of scope | Changing the capture UX, the reconstruction algorithm, or the prompts (they move as-is)                                            |
@@ -874,6 +874,24 @@ Each phase ends with a working, deployable system. Sizes are relative (S < M < L
 - Eval harness (`npm run eval`) wired to run the pipeline against fixture captures in CI (fix the fixture-parsing issue first), for both providers. Use it for the Opus 5.5 effort sweep and the prompt-caching experiment.
 
 **Exit:** a scan uploaded through the API is analysed by a worker with results matching the current pipeline on the eval fixtures; killing a worker mid-run resumes from the last checkpoint.
+
+**As built:**
+
+- **Stages.** `load`, `detect` (inventory, landmarks and people screening together, as before), `catalog`, `verify`, `pass1`, `pass2` and `persist` are checkpointed. The graph solve and the constraints are pure and take milliseconds, so they are recomputed on resume instead of being saved. `persist`, `privacy` and `finalize` became one transaction: the rows, the frame poses, the people purge and the status change commit together or not at all. Frame images are not checkpointed; a resumed run downloads the same frames again by key, and starts over if one has disappeared, because frame numbers in later checkpoints would no longer line up.
+- **Resume, tested.** A run that fails in `pass1` and is retried skips the finished stages and doesn't pay for detection twice (pipeline and worker integration tests). A worker killed mid-run should resume the same way once BullMQ's stalled-job check hands its job to another worker; that path has not been exercised with a real kill yet. Calls made by failed attempts are kept, so a run's recorded cost covers every attempt.
+- **Queueing goes through the outbox.** The API doesn't talk to BullMQ: the claim, the `scan_analyses` row and an `analysis.cloud` / `analysis.local` outbox row commit in one transaction, and the relay enqueues them. Nothing is lost between commit and enqueue, and nothing is enqueued for a claim that rolled back. A partial unique index allows one live run per scan.
+- **Ownership.** A run owns its scan while `analysis_notes.analysis_id` names it. Every write re-checks that, so a run that was swept as stalled, superseded or deleted can't overwrite anything.
+- **Provider names.** The local provider keeps the name `ollama` (as stored on existing rows and used by `analysis-deadline.ts`). The API takes `provider: "claude" | "ollama"`; production accepts only `claude` (D12), and production workers don't consume `analysis-local`.
+- **Claude requests** follow §9.7.2: explicit effort, structured outputs, streaming, no `thinking` field, server-side refusal fallbacks (`fallbacks: "default"`, beta `server-side-fallback-2026-07-01`), and the model that answered is recorded (`usage.iterations`). A `reasoning_extraction` refusal is logged as an error. Per-viewpoint detection batches put a cache breakpoint after their shared prefix. Cross-pass caching (§9.7.4) changes prompt layout and waits for the eval.
+- **LLM gate.** A Redis semaphore per provider (leased, renewed while held, so a crashed holder can't block others), plus token buckets for RPM, ITPM and OTPM that reserve an estimate and settle against real usage. A 429 halves the refill rate for a minute. The `anthropic-ratelimit-*` headers are not read yet.
+- **Cost accounting (§9.7.8)** is fixed: per-model cache pricing (Opus 5.5 cache reads at $0.20 per million), local calls priced at zero, and a run's cost priced on the model that actually answered.
+- **Review budget.** The original skipped the review pass after 100 s unless the draft had structural problems, because of its request time limit. The worker keeps that default (`ANALYSIS_REVIEW_BUDGET_MS`) so results match. With Opus 5.5 most runs pass 100 s before the review, so this skips the review on most runs: decide with the eval (it costs about one frame set per run). The eval harness always runs the review.
+- **Privacy sweep** (`POST /v1/scans/:id/privacy-purge`) is now a job. Unlike the screening inside an analysis, a failed model call fails the job (and it retries) instead of reporting "no people found". Its status is kept in `analysis_notes.privacy_sweep`.
+- **SSE.** One Redis subscriber per API replica fans out to its streams, with a per-replica cap (`SSE_MAX_STREAMS`). `EventSource` can't send the bearer token, so the web app reads the stream with `fetch`.
+- **Quotas.** `analyze_scan` 5 per hour and 20 per day, and `purge_people` 10 per hour, on the Postgres limiter. A space with no frames is refused before it's charged.
+- **Eval harness** (`tools/eval`, `pnpm eval`). The fixture that broke the old harness had a comment header; fixtures may now contain comments. A fixture with a capture folder runs through the real pipeline, live (`--provider claude|ollama`, with `--effort` per step and `--record`) or by replaying recorded replies, which is what CI runs. **There are no real captures yet:** the two original fixtures are ground truth only, and CI replays one synthetic capture. The phase's exit criterion "results matching the current pipeline on the eval fixtures" can only be checked once real captures are recorded, together with the effort sweep and the caching experiment.
+- **Not built in this phase:** the `analysis-batch` lane (§9.7.5; there's no re-analysis workload yet), the per-user and global daily spend budgets and queue-depth backpressure (§9.3; with the Redis quotas in phase 5), and reading rate-limit headers.
+- **Configuration.** Catalog reference photos are downloaded only from `CATALOG_IMAGE_ORIGINS` (default none; the original allowed its Supabase host). Embeddings default to `none` until the catalog is embedded again (`EMBEDDING_PROVIDER`).
 
 ### Phase 4 — Frontend migration (L)
 

@@ -11,6 +11,9 @@ export const QUEUE = {
   blobGc: "blob-gc",
   media: "media",
   maintenance: "maintenance",
+  analysisCloud: "analysis-cloud",
+  analysisLocal: "analysis-local",
+  privacyPurge: "privacy-purge",
 } as const;
 export type QueueName = (typeof QUEUE)[keyof typeof QUEUE];
 
@@ -19,6 +22,9 @@ export const TOPIC_QUEUE: Record<OutboxTopic, QueueName> = {
   [OUTBOX_TOPICS.blobDelete]: QUEUE.blobGc,
   [OUTBOX_TOPICS.blobDeletePrefix]: QUEUE.blobGc,
   [OUTBOX_TOPICS.mediaProcess]: QUEUE.media,
+  [OUTBOX_TOPICS.analysisCloud]: QUEUE.analysisCloud,
+  [OUTBOX_TOPICS.analysisLocal]: QUEUE.analysisLocal,
+  [OUTBOX_TOPICS.privacyPurge]: QUEUE.privacyPurge,
 };
 
 /** Retries with backoff; finished jobs are pruned so Redis doesn't grow without bound (§9.1). */
@@ -28,6 +34,25 @@ export const DEFAULT_JOB_OPTIONS: JobsOptions = {
   removeOnComplete: { age: 60 * 60, count: 1000 },
   removeOnFail: { age: 7 * 24 * 60 * 60 },
 };
+
+/**
+ * Model-backed jobs retry fewer times, with longer backoff: retries resume
+ * from checkpoints, and only transient failures are retried at all (the
+ * processors throw UnrecoverableError for the rest).
+ */
+export function jobOptionsFor(queue: QueueName, config: WorkerConfig): JobsOptions {
+  if (queue === QUEUE.analysisCloud || queue === QUEUE.analysisLocal) {
+    return {
+      ...DEFAULT_JOB_OPTIONS,
+      attempts: config.analysis.attempts,
+      backoff: { type: "exponential", delay: 30_000 },
+    };
+  }
+  if (queue === QUEUE.privacyPurge) {
+    return { ...DEFAULT_JOB_OPTIONS, attempts: 3, backoff: { type: "exponential", delay: 30_000 } };
+  }
+  return DEFAULT_JOB_OPTIONS;
+}
 
 /** BullMQ needs `maxRetriesPerRequest: null` so blocking commands wait instead of failing. */
 export const redisConnection = (url: string) => new Redis(url, { maxRetriesPerRequest: null });
@@ -47,7 +72,7 @@ export class Queues implements OnApplicationShutdown {
       queue = new Queue(name, {
         connection: this.connection,
         prefix: this.config.queue.prefix,
-        defaultJobOptions: DEFAULT_JOB_OPTIONS,
+        defaultJobOptions: jobOptionsFor(name, this.config),
       });
       this.queues.set(name, queue);
     }

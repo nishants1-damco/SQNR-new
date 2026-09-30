@@ -2,23 +2,25 @@
 
 The re-platformed Spatial Capture: a TanStack web app, a NestJS/Fastify API and a NestJS worker, on PostgreSQL (PostGIS + pgvector), Redis and Azure Blob Storage. The design and phased roadmap are in [docs/architecture/scaling-migration-plan.md](docs/architecture/scaling-migration-plan.md).
 
-**Status: phase 2 (core API and storage).** Auth, spaces (scans), direct-to-Blob frame uploads, exports, geocoding, consent and feature flags run in the API; the worker relays the outbox and runs the blob-cleanup, media and maintenance jobs. Analysis (the AI reconstruction pipeline) arrives in phase 3; see [What's next](#whats-next).
+**Status: phase 3 (analysis worker).** Auth, spaces (scans), direct-to-Blob frame uploads, exports, geocoding, consent and feature flags run in the API. The reconstruction pipeline runs in the worker as a checkpointed job on Claude Opus 5.5 (or a local Qwen model in development), queued by the API and followed over SSE. The web app arrives in phase 4; see [What's next](#whats-next).
 
 ## Layout
 
 ```
 apps/
   api/                   NestJS 11 on Fastify: auth, spaces, uploads, exports   @spatial/api
-  worker/                NestJS app context: outbox relay + BullMQ jobs         @spatial/worker
+  worker/                NestJS app context: outbox relay, analysis, BullMQ jobs @spatial/worker
 packages/
   config/                validated env for api/worker + local-stack defaults    @spatial/config
   contracts/             zod wire schemas shared by every app                   @spatial/contracts
   db/                    SQL migrations, migrator, Drizzle schema, outbox       @spatial/db
   storage/               BlobStore on Azure Blob Storage / Azurite              @spatial/storage
   domain/                pure geometry, solvers, reconciliation                 @spatial/domain/<module>
+  pipeline/              reconstruction pipeline, model providers, prompts      @spatial/pipeline
   tsconfig/              shared TypeScript settings (strict)
   eslint-config/         shared ESLint flat configs
 tools/dev-infra/         init and end-to-end check of the local stack
+tools/eval/              reconstruction eval harness and fixtures               @spatial/eval
 infra/docker/            Docker Compose: Postgres, PgBouncer, Redis, Azurite, Mailpit, Ollama
 docs/                    migration plan, porting ledger
 ```
@@ -52,7 +54,8 @@ Without a signing key the API makes a new one on every start, which signs everyo
 ```sh
 pnpm check              # lint + typecheck + unit tests + build, all packages (Turborepo)
 pnpm test               # unit tests only (no Docker needed)
-pnpm test:integration   # db, storage, api and worker against the local stack
+pnpm test:integration   # db, storage, pipeline, api and worker against the local stack
+pnpm eval               # score the eval fixtures; replay recorded captures (see "Analysis")
 pnpm db:status          # applied and pending migrations
 pnpm format             # Prettier
 ```
@@ -88,12 +91,38 @@ Every route needs a bearer access token unless it's marked `@Public()`. Errors a
 | `GET /v1/geocode?address=`                       | token          | Coordinates for a typed address                                                                                                                  |
 | `POST /v1/consents`                              | token          | Records capture consent, once per capture session                                                                                                |
 | `GET /v1/flags`                                  | token          | The caller's feature flags (per-user overrides win over global defaults)                                                                         |
+| `POST /v1/scans/:id/analysis`                    | token          | Queues an analysis (202). 200 with `already_running` or `duplicate` for a run in progress or a repeated capture id. 5 per hour and 20 per day    |
+| `GET /v1/scans/:id/analysis`                     | token          | The run's stage, progress, deadline and error, and the latest run record (attempts, cost)                                                        |
+| `GET /v1/scans/:id/analysis/events`              | token          | Server-sent events: a `status` snapshot, then `progress` until `done` or `failed`                                                                |
+| `POST /v1/scans/:id/privacy-purge`               | token          | Queues a re-screen of every frame for people; matches are deleted (202). 10 per hour                                                             |
 
 Rows keep their database column names (snake_case) and the JSON shape Supabase returned (numbers, ISO timestamps, GeoJSON geometry), so the web app's components port over unchanged.
 
 Sessions: a 15-minute EdDSA access token in the response body (keep it in memory), plus a 30-day refresh token in an `HttpOnly; SameSite=Strict` cookie scoped to `/v1/auth`. Refresh tokens rotate on every use, so a client must not refresh twice in parallel (single-flight); a parallel second refresh looks like a replayed token and ends the session.
 
 Auth endpoints are rate limited in Redis per IP and per account, and fail closed (503) if Redis is down.
+
+## Analysis
+
+A run is queued, not held open in a request:
+
+1. `POST /v1/scans/:id/analysis` checks the scan (the original app's idempotency and status gate), charges the quota, then in one transaction claims the scan (`status = processing`, `analysis_notes.analysis_id` and `deadline_at`), records the run in `scan_analyses` and writes the job to the outbox. A unique index allows one live run per scan.
+2. The worker runs the pipeline from `packages/pipeline` as stages (`load`, `detect`, `catalog`, `verify`, `pass1`, `pass2`, `persist`). Each stage's output is saved to `analysis_checkpoints`, so a retried job (after a crash, a deploy or a transient model error) resumes where it stopped instead of paying for the same passes again. Everything the run writes (objects, surfaces, portals, navigation graph, layers, frame poses, the privacy purge and the final status) goes in one transaction.
+3. The worker publishes each stage on Redis, and `GET /v1/scans/:id/analysis/events` relays it as server-sent events. Browsers' `EventSource` can't send the `Authorization` header, so read the stream with `fetch`, and poll `GET /v1/scans/:id/analysis` as the fallback.
+
+Transient failures (network, 5xx, 429, no capacity) retry with backoff. Anything else, or the last attempt, fails the run and the scan (`status = failed` with the error). Runs that outlive their deadline (30 minutes on Claude, 3 hours on a local model) are failed by the maintenance sweep.
+
+**Models.** Claude Opus 5.5 (`claude-opus-5-5`) through Anthropic's API and the official SDK. Every call sets an explicit effort, uses structured outputs and streaming, opts into server-side refusal fallbacks and records which model answered. Per-viewpoint detection batches mark their shared prefix for prompt caching. All workers share a Redis gate: concurrent calls (`LLM_PERMITS_CLAUDE`), plus requests, input tokens and output tokens per minute (`LLM_RPM_LIMIT`, `LLM_ITPM_LIMIT`, `LLM_OTPM_LIMIT`; set them to 85% of the granted limits). Local models (Ollama, `pnpm infra:llm`) are for development only: request `{"provider": "ollama"}`. Production refuses them. Settings are in `apps/worker/.env.example`.
+
+**Eval.** `pnpm eval` scores each fixture in `tools/eval/fixtures`. A fixture with a capture folder is run through the real pipeline. By default the harness replays model replies recorded earlier, so it needs no key and runs in CI. To measure a model instead:
+
+```sh
+pnpm eval --provider claude --record                          # live run; saves the replies for replay
+pnpm eval --provider claude --effort reconstruction=medium    # effort sweep, per step
+pnpm eval --provider ollama                                   # the local model
+```
+
+Live runs cost money (about $5 per capture on Opus 5.5) and print tokens and cost per fixture.
 
 ## Uploads
 
@@ -109,11 +138,14 @@ The worker then checks each frame's bytes, strips EXIF (GPS) from JPEGs in place
 
 `apps/worker` runs without an HTTP API (a small health endpoint on `HEALTH_PORT`, default 3100). Side effects are written to the `outbox` table in the same transaction as the change that causes them; the worker relays them to BullMQ (claiming rows with `FOR UPDATE SKIP LOCKED`, so replicas can share the work) and runs:
 
-| Queue         | Jobs                                                                                          |
-| ------------- | --------------------------------------------------------------------------------------------- |
-| `blob-gc`     | Delete blob keys, or a whole folder after a space is deleted                                  |
-| `media`       | Check a new frame's bytes, strip EXIF, write its thumbnail; remove uploads that aren't images |
-| `maintenance` | Every 10 minutes (once across all replicas): sweep abandoned upload sessions                  |
+| Queue            | Jobs                                                                                                          |
+| ---------------- | ------------------------------------------------------------------------------------------------------------- |
+| `blob-gc`        | Delete blob keys, or a whole folder after a space is deleted                                                  |
+| `media`          | Check a new frame's bytes, strip EXIF, write its thumbnail; remove uploads that aren't images                 |
+| `maintenance`    | Once across all replicas: abandoned upload sessions (10 min), stalled analyses (5 min), old checkpoints (6 h) |
+| `analysis-cloud` | Analyses on Claude; a retry resumes from the run's checkpoints                                                |
+| `analysis-local` | Analyses on a local model (development only; not consumed where local models are off)                         |
+| `privacy-purge`  | Re-screen every frame of a scan for people and delete the matches                                             |
 
 Jobs retry with exponential backoff and are idempotent, so a retry or a duplicate is harmless.
 
@@ -178,8 +210,10 @@ If Ollama is already installed and running on your machine, port 11434 is taken.
 `.github/workflows/ci.yml` runs two jobs on every push to `main` and every pull request:
 
 1. **Checks:** `pnpm format:check`, then lint, typecheck, unit tests and build.
-2. **Integration:** builds, starts the Compose stack, runs `pnpm infra:check`, migrates the dev database, runs `pnpm test:integration`, prints service logs on failure, and tears the stack down.
+2. **Integration:** builds, starts the Compose stack, runs `pnpm infra:check`, migrates the dev database, runs `pnpm test:integration` and `pnpm eval` (replay only, no model calls), prints service logs on failure, and tears the stack down.
 
 ## What's next
 
-Phase 3 (migration plan §17): `packages/pipeline` with the reconstruction pipeline and prompts moved from the original app, the `analysis` endpoint and queue with checkpointed stages, progress over SSE, the privacy purge, Claude Opus 5.5 with refusal fallbacks and rate limiting, and the eval harness in CI.
+Phase 4 (migration plan §17): `apps/web` on TanStack Router + Query, with the routes, components and browser libraries moved from the original app and every Supabase call replaced by the API.
+
+Still open from phase 3: record real captures as eval fixtures, then run the Opus 5.5 effort sweep and the cross-pass prompt-caching experiment against them (plan §9.7.3, §9.7.4).

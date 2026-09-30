@@ -11,12 +11,35 @@ export const OUTBOX_TOPICS = {
   blobDeletePrefix: "blob.delete_prefix",
   /** Check a newly uploaded frame and make its thumbnail. */
   mediaProcess: "media.process",
+  /** Run a claimed analysis on Claude. */
+  analysisCloud: "analysis.cloud",
+  /** Run a claimed analysis on a local model (development only, D12). */
+  analysisLocal: "analysis.local",
+  /** Re-screen every frame of a scan for people and delete the matches. */
+  privacyPurge: "privacy.purge",
 } as const;
+
+export interface AnalysisJob {
+  analysisId: string;
+  scanId: string;
+  userId: string;
+  provider: "claude" | "ollama";
+  model: string;
+}
+
+export interface PrivacyPurgeJob {
+  scanId: string;
+  userId: string;
+  requestedAt: string;
+}
 
 export type OutboxMessage =
   | { topic: typeof OUTBOX_TOPICS.blobDelete; payload: { keys: string[] } }
   | { topic: typeof OUTBOX_TOPICS.blobDeletePrefix; payload: { prefix: string } }
-  | { topic: typeof OUTBOX_TOPICS.mediaProcess; payload: { photoId: string } };
+  | { topic: typeof OUTBOX_TOPICS.mediaProcess; payload: { photoId: string } }
+  | { topic: typeof OUTBOX_TOPICS.analysisCloud; payload: AnalysisJob }
+  | { topic: typeof OUTBOX_TOPICS.analysisLocal; payload: AnalysisJob }
+  | { topic: typeof OUTBOX_TOPICS.privacyPurge; payload: PrivacyPurgeJob };
 
 export type OutboxTopic = OutboxMessage["topic"];
 
@@ -28,5 +51,5 @@ export async function enqueueOutbox(
     (m) => m.topic !== OUTBOX_TOPICS.blobDelete || m.payload.keys.length > 0,
   );
   if (rows.length === 0) return;
-  await db.insert(outbox).values(rows.map((m) => ({ topic: m.topic, payload: m.payload })));
+  await db.insert(outbox).values(rows.map((m) => ({ topic: m.topic, payload: { ...m.payload } })));
 }

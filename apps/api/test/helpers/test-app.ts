@@ -34,6 +34,7 @@ export async function startTestApp(env: Record<string, string> = {}): Promise<Te
     LOG_LEVEL: process.env["TEST_LOG_LEVEL"] ?? "silent",
     DATABASE_URL: database.appUrl,
     REDIS_KEY_PREFIX: `test:${database.name}:`,
+    QUEUE_PREFIX: `test:${database.name}`,
     WEB_ORIGINS: WEB_ORIGIN,
     APP_BASE_URL: WEB_ORIGIN,
     BLOB_CONTAINER_SCANS: container,
@@ -115,7 +116,12 @@ export class Client {
     const text = response.body;
     return {
       status: response.statusCode,
-      body: (text ? JSON.parse(text) : {}) as T,
+      // Non-JSON bodies (the event stream) come back as `{ text }`.
+      body: (!text
+        ? {}
+        : /json/.test(String(response.headers["content-type"] ?? ""))
+          ? JSON.parse(text)
+          : { text }) as T,
       headers: response.headers,
       cookies: response.cookies as Response["cookies"],
     };

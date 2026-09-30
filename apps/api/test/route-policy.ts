@@ -110,4 +110,31 @@ export const TENANT_SCOPED_ROUTES: TenantScopedRoute[] = [
     }),
     ownerStatus: 200,
   },
+  {
+    route: "POST /v1/scans/:id/analysis",
+    setup: async (owner) => {
+      const scan = await createScan(owner);
+      await uploadFrames(owner, scan.id, [{}]);
+      return { url: `/v1/scans/${scan.id}/analysis`, body: {} };
+    },
+    ownerStatus: 202,
+  },
+  {
+    route: "GET /v1/scans/:id/analysis",
+    setup: async (owner) => ({ url: `/v1/scans/${(await createScan(owner)).id}/analysis` }),
+    ownerStatus: 200,
+  },
+  {
+    // A scan that isn't processing: the stream sends its snapshot and ends.
+    route: "GET /v1/scans/:id/analysis/events",
+    setup: async (owner) => ({
+      url: `/v1/scans/${(await createScan(owner)).id}/analysis/events`,
+    }),
+    ownerStatus: 200,
+  },
+  {
+    route: "POST /v1/scans/:id/privacy-purge",
+    setup: async (owner) => ({ url: `/v1/scans/${(await createScan(owner)).id}/privacy-purge` }),
+    ownerStatus: 202,
+  },
 ];

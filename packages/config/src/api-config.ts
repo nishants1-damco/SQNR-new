@@ -3,11 +3,14 @@
 // back to the local Docker stack; in production those defaults are refused
 // and every connection and secret must be set explicitly.
 import { z } from "zod";
+import {
+  booleanString,
+  llmConfigProblems,
+  LlmEnvSchema,
+  llmModels,
+  type LlmModelsConfig,
+} from "./llm-config";
 import { localStack } from "./local-stack";
-
-const booleanString = z
-  .enum(["true", "false", "1", "0"])
-  .transform((value) => value === "true" || value === "1");
 
 const csv = z.string().transform((value) =>
   value
@@ -16,7 +19,7 @@ const csv = z.string().transform((value) =>
     .filter(Boolean),
 );
 
-const ApiEnvSchema = z.object({
+const ApiEnvSchema = LlmEnvSchema.extend({
   NODE_ENV: z.enum(["development", "test", "production"]).default("development"),
   HOST: z.string().default("0.0.0.0"),
   PORT: z.coerce.number().int().min(1).max(65535).default(3000),
@@ -29,6 +32,15 @@ const ApiEnvSchema = z.object({
   REDIS_CACHE_URL: z.url().optional(),
   /** Namespaces every key, so environments (and test runs) sharing a Redis never collide. */
   REDIS_KEY_PREFIX: z.string().default("spatial:"),
+  /** The worker's queue Redis: analysis progress events are published there (plan §9.6). */
+  REDIS_QUEUE_URL: z.url().optional(),
+  /** Must match the worker's QUEUE_PREFIX. */
+  QUEUE_PREFIX: z
+    .string()
+    .regex(/^[\w:-]+$/)
+    .default("spatial"),
+  /** Open analysis event streams one API replica serves at most. */
+  SSE_MAX_STREAMS: z.coerce.number().int().min(1).max(100_000).default(2000),
 
   WEB_ORIGINS: csv.default(["http://localhost:5173"]),
   /** Where emailed links point (the web app). */
@@ -92,6 +104,8 @@ export interface ApiConfig {
     containers: { scans: string };
   };
   geocoder: { provider: "nominatim" | "fake" | "disabled"; userAgent: string };
+  queue: { redisUrl: string; prefix: string };
+  analysis: LlmModelsConfig & { maxStreams: number };
 }
 
 export class ConfigError extends Error {
@@ -114,11 +128,12 @@ export function loadApiConfig(env: Record<string, string | undefined> = process.
   const e = parsed.data;
   const production = e.NODE_ENV === "production";
 
-  const problems: string[] = [];
+  const problems: string[] = llmConfigProblems(e, production);
   if (production) {
     for (const name of [
       "DATABASE_URL",
       "REDIS_CACHE_URL",
+      "REDIS_QUEUE_URL",
       "JWT_PRIVATE_KEY",
       "JWT_KEY_ID",
       "SMTP_URL",
@@ -177,6 +192,8 @@ export function loadApiConfig(env: Record<string, string | undefined> = process.
       containers: { scans: e.BLOB_CONTAINER_SCANS },
     },
     geocoder: { provider: e.GEOCODER_PROVIDER, userAgent: e.GEOCODER_USER_AGENT },
+    queue: { redisUrl: e.REDIS_QUEUE_URL ?? local?.redisUrl ?? "", prefix: e.QUEUE_PREFIX },
+    analysis: { ...llmModels(e, production), maxStreams: e.SSE_MAX_STREAMS },
   };
 }
 

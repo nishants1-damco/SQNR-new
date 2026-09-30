@@ -1,0 +1,27 @@
+{
+  "name": "@spatial/eval",
+  "version": "0.0.0",
+  "private": true,
+  "description": "Reconstruction eval harness: scores the pipeline against hand-measured fixtures, live or by replaying recorded model replies.",
+  "type": "module",
+  "scripts": {
+    "eval": "tsx src/run-eval.ts",
+    "typecheck": "tsc -p tsconfig.json",
+    "lint": "eslint .",
+    "test": "vitest run"
+  },
+  "dependencies": {
+    "@spatial/config": "workspace:*",
+    "@spatial/db": "workspace:*",
+    "@spatial/pipeline": "workspace:*",
+    "@spatial/storage": "workspace:*",
+    "drizzle-orm": "^0.45.3",
+    "jpeg-js": "^0.4.4"
+  },
+  "devDependencies": {
+    "@spatial/eslint-config": "workspace:*",
+    "@spatial/tsconfig": "workspace:*",
+    "@types/node": "^24.19.0",
+    "tsx": "^4.23.15"
+  }
+}

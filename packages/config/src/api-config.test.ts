@@ -24,6 +24,7 @@ describe("loadApiConfig", () => {
       expect(names).toEqual([
         "DATABASE_URL",
         "REDIS_CACHE_URL",
+        "REDIS_QUEUE_URL",
         "JWT_PRIVATE_KEY",
         "JWT_KEY_ID",
         "SMTP_URL",
@@ -37,6 +38,7 @@ describe("loadApiConfig", () => {
       NODE_ENV: "production",
       DATABASE_URL: "postgres://app:secret@db.internal:6432/spatial",
       REDIS_CACHE_URL: "rediss://cache.internal:6380",
+      REDIS_QUEUE_URL: "rediss://queue.internal:6380",
       JWT_PRIVATE_KEY: "-----BEGIN PRIVATE KEY-----\\nabc\\n-----END PRIVATE KEY-----",
       JWT_KEY_ID: "2026-09",
       SMTP_URL: "smtp://mail.internal:587",
@@ -88,5 +90,24 @@ describe("loadWorkerConfig", () => {
     expect(local.queue).toEqual({ redisUrl: "redis://127.0.0.1:6379", prefix: "spatial" });
     expect(local.database.url).toBe("postgres://app_rw:app_rw_dev@127.0.0.1:6432/spatial");
     expect(() => loadWorkerConfig({ NODE_ENV: "production" })).toThrow(/REDIS_QUEUE_URL/);
+    expect(() => loadWorkerConfig({ NODE_ENV: "production" })).toThrow(/ANTHROPIC_API_KEY/);
+  });
+
+  it("runs Claude Opus 5.5 by default and local models only outside production (D12)", async () => {
+    const { loadWorkerConfig } = await import("./worker-config");
+    const local = loadWorkerConfig({ ...ports });
+    expect(local.llm).toMatchObject({
+      defaultProvider: "claude",
+      models: { claude: "claude-opus-5-5", ollama: "qwen2.5vl-3b-48k" },
+      localEnabled: true,
+      localBaseUrl: "http://127.0.0.1:11434/v1",
+      anthropic: { fallbackModel: "claude-sonnet-5", refusalFallbacks: true },
+    });
+    expect(() => loadWorkerConfig({ NODE_ENV: "production", LLM_LOCAL_ENABLED: "true" })).toThrow(
+      /development-only/,
+    );
+    expect(() => loadApiConfig({ NODE_ENV: "production", LLM_DEFAULT_PROVIDER: "ollama" })).toThrow(
+      /must be claude in production/,
+    );
   });
 });

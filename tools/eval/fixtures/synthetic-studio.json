@@ -1,0 +1,17 @@
+{
+  "id": "synthetic-studio",
+  "label": "Synthetic 3.5m x 4m studio: replays scripted model replies through the whole pipeline",
+  "notes": "Not a real room. The frames are blank and the replies in synthetic-studio/replies.claude.json are hand-written, so this fixture checks the harness and the deterministic half of the pipeline (sampling, constraints, persistence), not the model.",
+  "ground_truth": {
+    "width_m": 3.5,
+    "length_m": 4.0,
+    "height_m": 2.5,
+    "objects": [{ "label": "Desk", "category": "table", "width_m": 1.4 }],
+    "portals": [{ "kind": "door", "wall": "east", "width_m": 0.9 }]
+  },
+  "tolerance": {
+    "shell_m": 0.05,
+    "object_width_m": 0.05,
+    "portal_width_m": 0.05
+  }
+}

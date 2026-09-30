@@ -19,6 +19,8 @@ export abstract class QueueProcessor implements OnApplicationBootstrap, OnApplic
   protected abstract handle(job: Job): Promise<unknown>;
 
   onApplicationBootstrap() {
+    // A queue this deployment doesn't serve (e.g. analysis-local in production).
+    if (this.concurrency < 1) return;
     this.worker = new Worker(this.queueName, (job) => this.handle(job), {
       connection: redisConnection(this.workerConfig.queue.redisUrl),
       prefix: this.workerConfig.queue.prefix,
