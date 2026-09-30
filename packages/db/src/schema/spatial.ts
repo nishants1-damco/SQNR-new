@@ -3,6 +3,7 @@
 // come back as strings (node-postgres keeps full precision); convert at the
 // edge where a number is needed.
 import {
+  bigint,
   boolean,
   integer,
   jsonb,
@@ -72,6 +73,8 @@ export const scanPhotos = pgTable("scan_photos", {
   cameraPose: geometry("camera_pose", "PointZ"),
   viewCone: geometry("view_cone", "Polygon"),
   sensorPayload: json("sensor_payload"),
+  thumbnailPath: text("thumbnail_path"),
+  mediaCheckedAt: timestamptz("media_checked_at"),
 });
 
 export const scanObjects = pgTable("scan_objects", {
@@ -249,4 +252,36 @@ export const productDimensions = pgTable("product_dimensions", {
   classification: text("classification"),
   specs: json("specs"),
   embedding: vector("embedding", { dimensions: 768 }),
+});
+
+export type UploadFileKind = "frame" | "depth";
+
+export interface UploadSessionFile {
+  index: number;
+  kind: UploadFileKind;
+  key: string;
+  contentType: string;
+  maxBytes: number;
+}
+
+export const uploadSessions = pgTable("upload_sessions", {
+  id: uuid("id").primaryKey().defaultRandom(),
+  userId: owner(),
+  scanId: uuid("scan_id")
+    .notNull()
+    .references(() => scans.id, { onDelete: "cascade" }),
+  files: jsonb("files").$type<UploadSessionFile[]>().notNull(),
+  expiresAt: timestamptz("expires_at").notNull(),
+  completedAt: timestamptz("completed_at"),
+  createdAt: created(),
+});
+
+export const outbox = pgTable("outbox", {
+  id: bigint("id", { mode: "number" }).primaryKey().generatedAlwaysAsIdentity(),
+  topic: text("topic").notNull(),
+  payload: jsonb("payload").$type<Record<string, unknown>>().notNull(),
+  createdAt: created(),
+  dispatchedAt: timestamptz("dispatched_at"),
+  attempts: integer("attempts").notNull().default(0),
+  lastError: text("last_error"),
 });

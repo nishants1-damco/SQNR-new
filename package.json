@@ -15,7 +15,7 @@
     "check": "turbo run lint typecheck test build",
     "format": "prettier --write .",
     "format:check": "prettier --check .",
-    "dev": "turbo run dev --filter=@spatial/api",
+    "dev": "turbo run dev --filter=@spatial/api --filter=@spatial/worker",
     "db:migrate": "turbo run build --filter=@spatial/db^... && pnpm --filter @spatial/db run migrate",
     "db:status": "turbo run build --filter=@spatial/db^... && pnpm --filter @spatial/db run status",
     "db:seed": "turbo run build --filter=@spatial/api && pnpm --filter @spatial/api run seed",
@@ -25,7 +25,9 @@
     "infra:check": "turbo run build --filter=@spatial/dev-infra^... && pnpm --filter @spatial/dev-infra run check",
     "infra:logs": "docker compose -f infra/docker/docker-compose.yml logs",
     "infra:llm": "docker compose -f infra/docker/docker-compose.yml --profile local-llm up -d --wait ollama",
-    "infra:llm:models": "docker compose -f infra/docker/docker-compose.yml --profile local-llm exec ollama sh /modelfiles/create-models.sh"
+    "infra:llm:models": "docker compose -f infra/docker/docker-compose.yml --profile local-llm exec ollama sh /modelfiles/create-models.sh",
+    "dev:api": "turbo run dev --filter=@spatial/api",
+    "dev:worker": "turbo run dev --filter=@spatial/worker"
   },
   "devDependencies": {
     "eslint": "^9.39.5",

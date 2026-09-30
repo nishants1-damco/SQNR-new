@@ -2,8 +2,9 @@
 // Supabase's row-level security gave: one user can never read or change
 // another user's data. It is deliberately generic, so it covers every route
 // the app registers, including routes added later.
-import type { AuthSession, MeResponse } from "@spatial/contracts";
+import type { AuthSession, MeResponse, ScanListResponse } from "@spatial/contracts";
 import { afterAll, beforeAll, describe, expect, it } from "vitest";
+import { createScan, issueUpload, putFile, uploadFrames } from "./helpers/spaces";
 import { Client, startTestApp, type TestApp, uniqueEmail } from "./helpers/test-app";
 import { PUBLIC_ROUTES, SELF_SCOPED_ROUTES, TENANT_SCOPED_ROUTES } from "./route-policy";
 
@@ -90,14 +91,60 @@ describe("self-scoped routes", () => {
     expect(asAlice.body.user.id).toBe(alice.id);
     expect(asBob.body.user.id).toBe(bob.id);
   });
+
+  it("never list another user's spaces", async () => {
+    const [alice, bob] = await Promise.all([newUser(), newUser()]);
+    await createScan(alice, { name: "Alice's room" });
+    const asBob = await bob.client.request<ScanListResponse>({
+      method: "GET",
+      url: "/v1/scans?q=Alice",
+      token: bob.token,
+    });
+    expect(asBob.body.items).toEqual([]);
+    expect(asBob.body.totals.count).toBe(0);
+  });
+});
+
+describe("cross-wired ids", () => {
+  // Owning the scan in the path must not unlock someone else's child resource.
+  it("won't complete another user's upload session through the caller's own scan", async () => {
+    const [owner, stranger] = await Promise.all([newUser(), newUser()]);
+    const ownerScan = await createScan(owner);
+    const issued = await issueUpload(owner, ownerScan.id, [
+      { kind: "frame", contentType: "image/jpeg", sizeBytes: 12 },
+    ]);
+    await putFile(issued.body.files[0]!);
+    const strangerScan = await createScan(stranger);
+    const res = await stranger.client.request({
+      method: "POST",
+      url: `/v1/scans/${strangerScan.id}/uploads/${issued.body.sessionId}/complete`,
+      token: stranger.token,
+      body: { frames: [{ fileIndex: 0, headingDeg: 0 }] },
+    });
+    expect(res.status).toBe(404);
+  });
+
+  it("won't delete another user's frame through the caller's own scan", async () => {
+    const [owner, stranger] = await Promise.all([newUser(), newUser()]);
+    const ownerScan = await createScan(owner);
+    const { complete } = await uploadFrames(owner, ownerScan.id, [{}]);
+    const strangerScan = await createScan(stranger);
+    const res = await stranger.client.request({
+      method: "DELETE",
+      url: `/v1/scans/${strangerScan.id}/photos/${complete.body.photos[0]!.id}`,
+      token: stranger.token,
+    });
+    expect(res.status).toBe(404);
+    const detail = await owner.client.request<{ photos: unknown[] }>({
+      method: "GET",
+      url: `/v1/scans/${ownerScan.id}`,
+      token: owner.token,
+    });
+    expect(detail.body.photos).toHaveLength(1);
+  });
 });
 
 describe("tenant-scoped routes", () => {
-  if (TENANT_SCOPED_ROUTES.length === 0) {
-    it.todo("no resource routes yet: phase 2 adds scans, uploads and exports");
-    return;
-  }
-
   it.each(TENANT_SCOPED_ROUTES.map((r) => [r.route, r] as const))(
     "%s: another user gets 404, the owner succeeds",
     async (_name, route) => {

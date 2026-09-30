@@ -26,6 +26,8 @@
     "@spatial/config": "workspace:*",
     "@spatial/contracts": "workspace:*",
     "@spatial/db": "workspace:*",
+    "@spatial/domain": "workspace:*",
+    "@spatial/storage": "workspace:*",
     "bcryptjs": "^3.0.3",
     "drizzle-orm": "^0.45.3",
     "fastify": "5.11.3",

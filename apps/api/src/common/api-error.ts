@@ -29,6 +29,10 @@ export class ApiError extends Error {
     return new ApiError(404, "not_found", message);
   }
 
+  static conflict(message: string) {
+    return new ApiError(409, "conflict", message);
+  }
+
   static tokenInvalid(message = "This link is invalid or has expired") {
     return new ApiError(400, "token_invalid", message);
   }

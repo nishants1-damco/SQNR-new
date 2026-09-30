@@ -34,6 +34,7 @@ describe("readMigrations", () => {
       "0001_identity",
       "0002_spatial",
       "0003_reference_data",
+      "0004_uploads_and_outbox",
     ]);
   });
 });

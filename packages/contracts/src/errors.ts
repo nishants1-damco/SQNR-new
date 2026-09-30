@@ -9,6 +9,7 @@ export const ERROR_CODES = [
   "email_taken",
   "token_invalid",
   "not_found",
+  "conflict",
   "rate_limited",
   "service_unavailable",
   "internal_error",

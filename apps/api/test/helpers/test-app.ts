@@ -1,12 +1,14 @@
 // Boots the real API (createApp) against a throwaway database, the local
-// Redis (under a per-run key prefix) and Mailpit. Requests go through
+// Redis (under a per-run key prefix), a throwaway Azurite container and
+// Mailpit. Geocoding uses the fake provider, so tests never call Nominatim. Requests go through
 // Fastify's inject(), so the whole HTTP stack runs without opening a port.
 import "reflect-metadata";
-import { randomInt } from "node:crypto";
+import { randomBytes, randomInt } from "node:crypto";
 import type { NestFastifyApplication } from "@nestjs/platform-fastify";
 import { type ApiConfig, loadApiConfig } from "@spatial/config";
 import { createTestDatabase, type TestDatabase } from "@spatial/db/testing";
 import { createApp } from "../../src/app";
+import { createScansBlobStore } from "../../src/storage/storage.module";
 
 export const WEB_ORIGIN = "http://localhost:5173";
 
@@ -26,6 +28,7 @@ export interface TestApp {
 
 export async function startTestApp(env: Record<string, string> = {}): Promise<TestApp> {
   const database = await createTestDatabase();
+  const container = `test-${randomBytes(6).toString("hex")}`;
   const config = loadApiConfig({
     NODE_ENV: "test",
     LOG_LEVEL: process.env["TEST_LOG_LEVEL"] ?? "silent",
@@ -33,8 +36,12 @@ export async function startTestApp(env: Record<string, string> = {}): Promise<Te
     REDIS_KEY_PREFIX: `test:${database.name}:`,
     WEB_ORIGINS: WEB_ORIGIN,
     APP_BASE_URL: WEB_ORIGIN,
+    BLOB_CONTAINER_SCANS: container,
+    GEOCODER_PROVIDER: "fake",
     ...env,
   });
+  const blobs = createScansBlobStore(config);
+  await blobs.ensureContainer();
 
   const app = await createApp(config);
   const routes: RegisteredRoute[] = [];
@@ -57,6 +64,7 @@ export async function startTestApp(env: Record<string, string> = {}): Promise<Te
     routes,
     close: async () => {
       await app.close();
+      await blobs.container.deleteIfExists();
       await database.drop();
     },
   };

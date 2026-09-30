@@ -46,6 +46,21 @@ const ApiEnvSchema = z.object({
   REFRESH_TOKEN_TTL_DAYS: z.coerce.number().int().min(1).max(90).default(30),
   COOKIE_SECURE: booleanString.optional(),
 
+  /** Account-key connection string (Azurite locally). */
+  BLOB_CONNECTION_STRING: z.string().min(1).optional(),
+  /** `https://<account>.blob.core.windows.net`; used with managed identity in Azure. */
+  BLOB_ACCOUNT_URL: z.url().optional(),
+  /** Origin browsers use for SAS URLs, if not the storage endpoint itself. */
+  BLOB_PUBLIC_ENDPOINT: z.url().optional(),
+  BLOB_CONTAINER_SCANS: z
+    .string()
+    .regex(/^[a-z0-9](?:[a-z0-9-]{1,61}[a-z0-9])$/, "not a valid container name")
+    .default("scans"),
+
+  /** Reverse/forward geocoding. `fake` returns fixed results (tests); `disabled` returns none. */
+  GEOCODER_PROVIDER: z.enum(["nominatim", "fake", "disabled"]).default("nominatim"),
+  GEOCODER_USER_AGENT: z.string().default("SQNR-VectorCapture/1.0 (spatial scan app)"),
+
   SMTP_URL: z.string().min(1).optional(),
   MAIL_FROM: z.string().default("Spatial Capture <no-reply@spatial.local>"),
 });
@@ -70,6 +85,13 @@ export interface ApiConfig {
     previousKey: { publicKeyPem: string; keyId: string } | null;
   };
   mail: { smtpUrl: string; from: string };
+  blob: {
+    connectionString: string | null;
+    accountUrl: string | null;
+    publicEndpoint: string | null;
+    containers: { scans: string };
+  };
+  geocoder: { provider: "nominatim" | "fake" | "disabled"; userAgent: string };
 }
 
 export class ConfigError extends Error {
@@ -104,6 +126,10 @@ export function loadApiConfig(env: Record<string, string | undefined> = process.
       if (!e[name]) problems.push(`${name}: required in production`);
     }
     if (e.COOKIE_SECURE === false) problems.push("COOKIE_SECURE: must not be false in production");
+    if (!e.BLOB_ACCOUNT_URL && !e.BLOB_CONNECTION_STRING) {
+      problems.push("BLOB_ACCOUNT_URL: required in production (or BLOB_CONNECTION_STRING)");
+    }
+    if (e.GEOCODER_PROVIDER === "fake") problems.push("GEOCODER_PROVIDER: fake is for tests only");
   }
   if (e.JWT_PRIVATE_KEY && !e.JWT_KEY_ID)
     problems.push("JWT_KEY_ID: required with JWT_PRIVATE_KEY");
@@ -141,6 +167,16 @@ export function loadApiConfig(env: Record<string, string | undefined> = process.
           : null,
     },
     mail: { smtpUrl: e.SMTP_URL ?? local?.smtpUrl ?? "", from: e.MAIL_FROM },
+    blob: {
+      // With an account URL, Azure credentials (managed identity) sign instead of a key.
+      connectionString:
+        e.BLOB_CONNECTION_STRING ??
+        (e.BLOB_ACCOUNT_URL ? null : (local?.blob.connectionString ?? null)),
+      accountUrl: e.BLOB_ACCOUNT_URL ?? null,
+      publicEndpoint: e.BLOB_PUBLIC_ENDPOINT ?? null,
+      containers: { scans: e.BLOB_CONTAINER_SCANS },
+    },
+    geocoder: { provider: e.GEOCODER_PROVIDER, userAgent: e.GEOCODER_USER_AGENT },
   };
 }
 

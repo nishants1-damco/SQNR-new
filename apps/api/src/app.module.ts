@@ -11,7 +11,10 @@ import { ConfigModule } from "./config/config.module";
 import { DatabaseModule } from "./database/database.module";
 import { HealthModule } from "./health/health.module";
 import { MailModule } from "./mail/mail.module";
+import { QuotaModule } from "./quota/quota.service";
 import { RedisModule } from "./redis/redis.module";
+import { SpacesModule } from "./scans/spaces.module";
+import { StorageModule } from "./storage/storage.module";
 
 const StrictZodValidationPipe = createZodValidationPipe({ strictSchemaDeclaration: true });
 
@@ -68,8 +71,11 @@ export class AppModule {
         DatabaseModule,
         RedisModule,
         MailModule,
+        StorageModule,
+        QuotaModule,
         HealthModule,
         AuthModule,
+        SpacesModule,
       ],
       providers: [
         { provide: APP_PIPE, useClass: AppValidationPipe },

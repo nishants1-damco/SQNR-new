@@ -27,6 +27,7 @@ describe("loadApiConfig", () => {
         "JWT_PRIVATE_KEY",
         "JWT_KEY_ID",
         "SMTP_URL",
+        "BLOB_ACCOUNT_URL",
       ]);
     }
   });
@@ -39,11 +40,17 @@ describe("loadApiConfig", () => {
       JWT_PRIVATE_KEY: "-----BEGIN PRIVATE KEY-----\\nabc\\n-----END PRIVATE KEY-----",
       JWT_KEY_ID: "2026-09",
       SMTP_URL: "smtp://mail.internal:587",
+      BLOB_ACCOUNT_URL: "https://spatialprod.blob.core.windows.net",
       WEB_ORIGINS: "https://app.example.com, https://www.example.com",
     });
     expect(config.auth.cookieSecure).toBe(true);
     expect(config.auth.signingKey?.privateKeyPem).toContain("\nabc\n");
     expect(config.web.origins).toEqual(["https://app.example.com", "https://www.example.com"]);
+    // Managed identity signs in Azure: no account key is configured or inferred.
+    expect(config.blob).toMatchObject({
+      accountUrl: "https://spatialprod.blob.core.windows.net",
+      connectionString: null,
+    });
   });
 
   it("rejects insecure cookies in production and half-configured key rotation", () => {
@@ -55,6 +62,7 @@ describe("loadApiConfig", () => {
         JWT_PRIVATE_KEY: "k",
         JWT_KEY_ID: "1",
         SMTP_URL: "smtp://m",
+        BLOB_ACCOUNT_URL: "https://a.blob.core.windows.net",
         COOKIE_SECURE: "false",
       }),
     ).toThrow(/COOKIE_SECURE/);
@@ -70,5 +78,15 @@ describe("loadMigratorDatabaseUrl", () => {
       "postgres://app_migrator:app_migrator_dev@127.0.0.1:5433/spatial",
     );
     expect(() => loadMigratorDatabaseUrl({ NODE_ENV: "production" })).toThrow(ConfigError);
+  });
+});
+
+describe("loadWorkerConfig", () => {
+  it("defaults to the local stack and requires explicit settings in production", async () => {
+    const { loadWorkerConfig } = await import("./worker-config");
+    const local = loadWorkerConfig({ ...ports });
+    expect(local.queue).toEqual({ redisUrl: "redis://127.0.0.1:6379", prefix: "spatial" });
+    expect(local.database.url).toBe("postgres://app_rw:app_rw_dev@127.0.0.1:6432/spatial");
+    expect(() => loadWorkerConfig({ NODE_ENV: "production" })).toThrow(/REDIS_QUEUE_URL/);
   });
 });

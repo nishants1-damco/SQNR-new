@@ -1,0 +1,41 @@
+{
+  "name": "@spatial/storage",
+  "version": "0.0.0",
+  "private": true,
+  "description": "Object storage (BlobStore) on Azure Blob Storage / Azurite.",
+  "type": "module",
+  "sideEffects": false,
+  "exports": {
+    ".": {
+      "import": {
+        "types": "./dist/index.d.ts",
+        "default": "./dist/index.js"
+      },
+      "require": {
+        "types": "./dist/index.d.cts",
+        "default": "./dist/index.cjs"
+      }
+    }
+  },
+  "files": [
+    "dist"
+  ],
+  "scripts": {
+    "build": "tsup",
+    "typecheck": "tsc -p tsconfig.json",
+    "lint": "eslint .",
+    "test": "vitest run",
+    "test:integration": "vitest run --config vitest.integration.config.ts"
+  },
+  "dependencies": {
+    "@azure/core-auth": "^1.11.0",
+    "@azure/identity": "^4.13.3",
+    "@azure/storage-blob": "^12.34.0"
+  },
+  "devDependencies": {
+    "@spatial/config": "workspace:*",
+    "@spatial/eslint-config": "workspace:*",
+    "@spatial/tsconfig": "workspace:*",
+    "@types/node": "^24.19.0"
+  }
+}

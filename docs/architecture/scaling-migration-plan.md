@@ -4,7 +4,7 @@
 
 |              |                                                                                                                                    |
 | ------------ | ---------------------------------------------------------------------------------------------------------------------------------- |
-| Status       | Draft v3 (decisions D1–D14 in §20). Phase 0 and phase 1 built; see the repository README                                           |
+| Status       | Draft v3 (decisions D1–D14 in §20). Phases 0–2 built; see the repository README                                                    |
 | Date         | 2026-09-30                                                                                                                         |
 | Scope        | Re-platform Spatial Capture from TanStack Start + Supabase to a separated frontend and backend that can serve ~1M registered users |
 | Out of scope | Changing the capture UX, the reconstruction algorithm, or the prompts (they move as-is)                                            |
@@ -855,6 +855,13 @@ Each phase ends with a working, deployable system. Sizes are relative (S < M < L
 - `QuotaModule` (Postgres-backed first, same limits as today).
 
 **Exit:** every endpoint in §7.3 except analysis and privacy purge works, with isolation tests.
+
+**As built:**
+
+- Reshoots are the `replaceStations` option on `uploads/:sessionId/complete` instead of a separate `stations/:station/reshoot` endpoint: the new frames and the removal of the old ones commit together.
+- Exports are returned inline for now; moving large IMDF/USD exports to a job that writes to the `exports` container waits until sizes show it's needed.
+- Thumbnails are JPEG (320 px), made with the original app's pure-JS crop code, so the worker needs no native image library.
+- Quotas stay Postgres-backed (`consume_rate_limit`) until phase 5, as planned.
 
 ### Phase 3 — Analysis worker (XL)
 
