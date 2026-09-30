@@ -1,0 +1,9 @@
+{
+  "$schema": "https://json.schemastore.org/tsconfig",
+  "display": "Shared library (runs in Node and the browser)",
+  "extends": "./base.json",
+  "compilerOptions": {
+    "noEmit": true,
+    "types": []
+  }
+}

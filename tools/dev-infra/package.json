@@ -1,0 +1,27 @@
+{
+  "name": "@spatial/dev-infra",
+  "version": "0.0.0",
+  "private": true,
+  "description": "Initialises and verifies the local Docker stack (Postgres, PgBouncer, Redis, Azurite, Mailpit).",
+  "type": "module",
+  "scripts": {
+    "init": "tsx src/init.ts",
+    "check": "tsx src/check.ts",
+    "typecheck": "tsc -p tsconfig.json",
+    "lint": "eslint ."
+  },
+  "dependencies": {
+    "@azure/storage-blob": "^12.34.0",
+    "ioredis": "^5.11.1",
+    "nodemailer": "^10.0.12",
+    "pg": "^8.23.0"
+  },
+  "devDependencies": {
+    "@spatial/eslint-config": "workspace:*",
+    "@spatial/tsconfig": "workspace:*",
+    "@types/node": "^24.19.0",
+    "@types/nodemailer": "^8.0.2",
+    "@types/pg": "^8.23.1",
+    "tsx": "^4.23.15"
+  }
+}

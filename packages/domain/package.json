@@ -1,0 +1,36 @@
+{
+  "name": "@spatial/domain",
+  "version": "0.0.0",
+  "private": true,
+  "description": "Pure spatial-capture logic shared by web, api and worker: geometry, solvers, reconciliation, exports. No I/O.",
+  "type": "module",
+  "sideEffects": false,
+  "exports": {
+    "./*": {
+      "import": {
+        "types": "./dist/*.d.ts",
+        "default": "./dist/*.js"
+      },
+      "require": {
+        "types": "./dist/*.d.cts",
+        "default": "./dist/*.cjs"
+      }
+    }
+  },
+  "files": [
+    "dist"
+  ],
+  "scripts": {
+    "build": "tsup",
+    "typecheck": "tsc -p tsconfig.json",
+    "lint": "eslint .",
+    "test": "vitest run"
+  },
+  "dependencies": {
+    "jpeg-js": "^0.4.4"
+  },
+  "devDependencies": {
+    "@spatial/eslint-config": "workspace:*",
+    "@spatial/tsconfig": "workspace:*"
+  }
+}

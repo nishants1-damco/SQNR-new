@@ -1,0 +1,129 @@
+# Local development stack (migration plan §14). Nothing here is used in
+# staging or production; see §15 for the Azure services that replace it.
+#
+#   pnpm infra:up      start everything and create Azurite containers
+#   pnpm infra:check   verify every service end to end
+#   pnpm infra:down    stop (keeps data)   ·   pnpm infra:reset   stop and wipe data
+#
+# Ports can be overridden in infra/docker/.env (see .env.example).
+name: spatial-capture
+
+services:
+  postgres:
+    build: ./postgres
+    image: spatial-capture/postgres:16-postgis3.5-pgvector
+    environment:
+      POSTGRES_DB: spatial
+      POSTGRES_USER: postgres
+      POSTGRES_PASSWORD: postgres
+    ports:
+      - "${POSTGRES_PORT:-5432}:5432"
+    volumes:
+      - postgres-data:/var/lib/postgresql/data
+      - ./postgres/initdb:/docker-entrypoint-initdb.d:ro
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U postgres -d spatial"]
+      interval: 5s
+      timeout: 5s
+      retries: 30
+
+  # Transaction pooling, as in production (§8.4). Apps connect here; the
+  # migrator connects to Postgres directly because DDL needs a session.
+  pgbouncer:
+    image: edoburu/pgbouncer:v1.26.0-p0
+    volumes:
+      - ./pgbouncer/pgbouncer.ini:/etc/pgbouncer/pgbouncer.ini:ro
+      - ./pgbouncer/userlist.txt:/etc/pgbouncer/userlist.txt:ro
+    ports:
+      - "${PGBOUNCER_PORT:-6432}:5432"
+    depends_on:
+      postgres:
+        condition: service_healthy
+    healthcheck:
+      test: ["CMD-SHELL", "nc -z 127.0.0.1 5432"]
+      interval: 5s
+      timeout: 5s
+      retries: 30
+
+  # Queue instance settings (§9.2): BullMQ must never have keys evicted.
+  redis:
+    image: redis:7.4-alpine
+    command: ["redis-server", "--appendonly", "yes", "--maxmemory-policy", "noeviction"]
+    ports:
+      - "${REDIS_PORT:-6379}:6379"
+    volumes:
+      - redis-data:/data
+    healthcheck:
+      test: ["CMD", "redis-cli", "ping"]
+      interval: 5s
+      timeout: 5s
+      retries: 30
+
+  # Azure Blob Storage emulator (§12). Blob service only. --skipApiVersionCheck
+  # because the Azure SDK can be newer than the latest Azurite release.
+  azurite:
+    image: mcr.microsoft.com/azure-storage/azurite:3.37.0
+    command:
+      [
+        "azurite-blob",
+        "--blobHost",
+        "0.0.0.0",
+        "--blobPort",
+        "10000",
+        "--location",
+        "/data",
+        "--loose",
+        "--skipApiVersionCheck",
+      ]
+    ports:
+      - "${AZURITE_BLOB_PORT:-10000}:10000"
+    volumes:
+      - azurite-data:/data
+    healthcheck:
+      test:
+        [
+          "CMD",
+          "node",
+          "-e",
+          "require('net').connect(10000,'127.0.0.1').on('connect',()=>process.exit(0)).on('error',()=>process.exit(1))",
+        ]
+      interval: 5s
+      timeout: 5s
+      retries: 30
+
+  # Catches every email the auth module sends (§14.2). Web inbox on 8025.
+  mailpit:
+    image: axllent/mailpit:v1.31
+    environment:
+      MP_SMTP_AUTH_ACCEPT_ANY: "1"
+      MP_SMTP_AUTH_ALLOW_INSECURE: "1"
+    ports:
+      - "${MAILPIT_SMTP_PORT:-1025}:1025"
+      - "${MAILPIT_UI_PORT:-8025}:8025"
+    healthcheck:
+      test: ["CMD", "/mailpit", "readyz"]
+      interval: 5s
+      timeout: 5s
+      retries: 30
+
+  # Local open-source vision model (D12: development only). Opt in with
+  # `pnpm infra:llm`, then `pnpm infra:llm:models` to build the Qwen variants.
+  ollama:
+    image: ollama/ollama:0.35.0
+    profiles: ["local-llm"]
+    ports:
+      - "${OLLAMA_PORT:-11434}:11434"
+    volumes:
+      - ollama-data:/root/.ollama
+      - ./ollama:/modelfiles:ro
+    healthcheck:
+      test: ["CMD", "ollama", "list"]
+      interval: 10s
+      timeout: 10s
+      retries: 30
+
+volumes:
+  postgres-data:
+  redis-data:
+  azurite-data:
+  ollama-data:
