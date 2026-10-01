@@ -22,11 +22,12 @@ packages/
   eslint-config/         shared ESLint flat configs
 tools/dev-infra/         init and end-to-end check of the local stack
 tools/eval/              reconstruction eval harness and fixtures               @spatial/eval
+tools/supabase-migration/  moves users, rows and files off Supabase (phase 6)   @spatial/supabase-migration
 infra/docker/            Docker Compose: Postgres, PgBouncer, Redis, Azurite, Mailpit, Ollama, Grafana LGTM;
                          app.Dockerfile (API and worker images)
 infra/azure/             Bicep for staging and production (see its README)
 tests/load/              k6 load-test scripts
-docs/                    migration plan, porting ledger, security review
+docs/                    migration plan, porting ledger, security review, cutover runbook
 ```
 
 `@spatial/domain` has no barrel file; import each module by subpath, e.g. `import { shellFromRanges } from "@spatial/domain/wall-ranges"`. It must stay free of I/O and runtime-specific globals so web, api and worker can all use it; its lint config enforces that.
@@ -225,10 +226,14 @@ If Ollama is already installed and running on your machine, port 11434 is taken.
 - **Edge.** In Azure the API trusts two proxy hops (`TRUST_PROXY=2`) and refuses requests without its Front Door id (`FRONT_DOOR_ID`). See [docs/security-review.md](docs/security-review.md).
 - **Deployment.** Images build from `infra/docker/app.Dockerfile` (`--build-arg APP=api|worker`). [infra/azure/README.md](infra/azure/README.md) covers the first deployment, and `.github/workflows/deploy.yml` deploys to staging, then production with an approval step.
 
+## Moving off Supabase
+
+`tools/supabase-migration` copies accounts (same ids, existing passwords), every table and every stored file from the Supabase project to the new platform, and verifies the result with row checksums and file MD5s. Runs are repeatable: a bulk copy days ahead, then a short read-only window for the final rows and the file delta. The procedure, its settings, rollback and the two open decisions (D8, D13) are in [docs/cutover-runbook.md](docs/cutover-runbook.md).
+
 ## What's next
 
 - Deploy to a subscription for the first time (`infra/azure/README.md`), then run the k6 scripts against staging (`tests/load/README.md`; only a small local read-mix run has been done).
 - The security review's open items (docs/security-review.md): add dependency, image and secret scanning to CI, and an account-deletion page in SQNR-web (run `pnpm shared:sync` there first).
-- Phase 6 (migration plan §17, §18.2): data migration from Supabase and cutover.
+- Phase 6 cutover: decide D8 (rollback of new writes) and D13 (Google sign-in), then rehearse on staging twice with production data and cut over ([docs/cutover-runbook.md](docs/cutover-runbook.md)).
 
 Still open from phase 3: record real captures as eval fixtures, then run the Opus 5.5 effort sweep and the cross-pass prompt-caching experiment against them (plan §9.7.3, §9.7.4).

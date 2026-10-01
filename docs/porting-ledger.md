@@ -129,6 +129,10 @@ New tests: Claude request rules, refusal and served-model handling, cache marker
 
 Hardening and scale had no counterpart in the original app, apart from its quota function, whose Postgres version is kept behind `QUOTA_BACKEND=postgres`. Account deletion (`DELETE /v1/me`) is new: the original app had none (plan §16.3). See the migration plan's Phase 5 "As built" section and `docs/security-review.md`.
 
+## Phase 6 — new
+
+`tools/supabase-migration` is new code for moving data, not a port. From the original app's `scripts/`, `upload-catalog-image.ts` moved catalog photos into a public Supabase bucket. The migration now copies them into the private `catalog-images` container and rewrites the rows to keys. Adding new catalog photos on the new platform still needs a small script, tracked below.
+
 ## Waiting for later phases
 
 | Phase    | Target           | Source                                                                                                                                                                                                                                   |

@@ -97,6 +97,7 @@ export class WorkerModule {
               embedder: createEmbedder(config.embeddings),
               logger,
               imageOrigins: config.catalogImageOrigins,
+              images: blobStoreFromSettings(config.blob, config.blob.containers.catalogImages),
             }),
         },
         {

@@ -704,6 +704,49 @@ importers:
         specifier: ^4.23.15
         version: 4.23.15
 
+  tools/supabase-migration:
+    dependencies:
+      '@azure/storage-blob':
+        specifier: ^12.34.0
+        version: 12.34.0(supports-color@7.2.0)
+      '@spatial/config':
+        specifier: workspace:*
+        version: link:../../packages/config
+      '@spatial/storage':
+        specifier: workspace:*
+        version: link:../../packages/storage
+      pg:
+        specifier: ^8.23.0
+        version: 8.23.0
+      pg-copy-streams:
+        specifier: ^7.0.0
+        version: 7.0.0
+    devDependencies:
+      '@spatial/db':
+        specifier: workspace:*
+        version: link:../../packages/db
+      '@spatial/eslint-config':
+        specifier: workspace:*
+        version: link:../../packages/eslint-config
+      '@spatial/tsconfig':
+        specifier: workspace:*
+        version: link:../../packages/tsconfig
+      '@types/node':
+        specifier: ^24.19.0
+        version: 24.19.0
+      '@types/pg':
+        specifier: ^8.23.1
+        version: 8.23.1
+      '@types/pg-copy-streams':
+        specifier: ^1.2.5
+        version: 1.2.5
+      bcryptjs:
+        specifier: ^3.0.3
+        version: 3.0.3
+      tsx:
+        specifier: ^4.23.15
+        version: 4.23.15
+
 packages:
 
   '@angular-devkit/core@19.2.24':
@@ -2547,6 +2590,9 @@ packages:
   '@types/nodemailer@8.0.2':
     resolution: {integrity: sha512-c7M5ox8p0nEOfbJ2E9Qcmt8/QCu/VzsiAhzBiZbvky2PhKZDHpKB3sQHBM5MEZNkCfBOaS6S9//AGPRTNB7IaA==}
 
+  '@types/pg-copy-streams@1.2.5':
+    resolution: {integrity: sha512-7D6/GYW2uHIaVU6S/5omI+6RZnwlZBpLQDZAH83xX1rjxAOK0f6/deKyyUTewxqts145VIGn6XWYz1YGf50G5g==}
+
   '@types/pg-pool@2.0.7':
     resolution: {integrity: sha512-U4CwmGVQcbEuqpyju8/ptOKg6gEC+Tqsvj2xS9o1g71bUh8twxnC6ZL5rZKCsGN0iyH0CwgUyc9VR5owNQF9Ng==}
 
@@ -4136,6 +4182,9 @@ packages:
 
   pg-connection-string@2.14.0:
     resolution: {integrity: sha512-XwWDGcLRGCXAR8F/AM5bG7Q+A3Wm2s6QeEjlOKZLlH3UYcguiqCWKyWXVag5TLTIjR7oOJUY8kcADaZgWPyLeg==}
+
+  pg-copy-streams@7.0.0:
+    resolution: {integrity: sha512-zBvnY6wtaBRE2ae2xXWOOGMaNVPkXh1vhypAkNSKgMdciJeTyIQAHZaEeRAxUjs/p1El5jgzYmwG5u871Zj3dQ==}
 
   pg-int8@1.0.1:
     resolution: {integrity: sha512-WCtabS6t3c8SkpDBUlb1kjOs7l66xsGdKpIPZsg4wR+B3+u9UAum2odSsF9tnvxg80h4ZxLWMy4pRjOsFIqQpw==}
@@ -6633,6 +6682,11 @@ snapshots:
     dependencies:
       '@types/node': 24.19.0
 
+  '@types/pg-copy-streams@1.2.5':
+    dependencies:
+      '@types/node': 24.19.0
+      '@types/pg': 8.23.1
+
   '@types/pg-pool@2.0.7':
     dependencies:
       '@types/pg': 8.23.1
@@ -8265,6 +8319,8 @@ snapshots:
     optional: true
 
   pg-connection-string@2.14.0: {}
+
+  pg-copy-streams@7.0.0: {}
 
   pg-int8@1.0.1: {}
 

@@ -11,6 +11,7 @@ import {
   pickProductMatch,
   type ProductDimension,
 } from "@spatial/domain/product-catalog";
+import type { BlobStore } from "@spatial/storage";
 import { sql } from "drizzle-orm";
 import { errString, type PipelineLogger } from "./logger";
 
@@ -79,6 +80,11 @@ export interface CatalogSourceOptions {
    */
   imageOrigins: string[];
   fetch?: typeof fetch;
+  /**
+   * The private `catalog-images` container. Rows migrated from Supabase keep
+   * a blob key instead of a public URL (tools/supabase-migration).
+   */
+  images?: Pick<BlobStore, "head" | "get">;
 }
 
 type Row = Record<string, unknown>;
@@ -220,6 +226,7 @@ export class CatalogSource {
    * allowed origin are fetched; anything else, or any failure, returns null.
    */
   async fetchCatalogImage(url: string): Promise<{ contentType: string; base64: string } | null> {
+    if (!/^[a-z][a-z0-9+.-]*:/i.test(url)) return this.readCatalogImage(url);
     try {
       const parsed = new URL(url);
       if (parsed.protocol !== "https:" || !this.options.imageOrigins.includes(parsed.origin)) {
@@ -239,6 +246,24 @@ export class CatalogSource {
       return { contentType, base64: Buffer.from(bytes).toString("base64") };
     } catch (err) {
       this.options.logger.warn({ err: errString(err) }, "catalog image fetch failed");
+      return null;
+    }
+  }
+
+  /** A catalog photo stored as a blob key. */
+  private async readCatalogImage(
+    key: string,
+  ): Promise<{ contentType: string; base64: string } | null> {
+    const images = this.options.images;
+    if (!images) return null;
+    try {
+      const head = await images.head(key);
+      if (!head || head.size === 0 || head.size > 4_000_000) return null;
+      const contentType = head.contentType ?? "image/jpeg";
+      if (!contentType.startsWith("image/")) return null;
+      return { contentType, base64: Buffer.from(await images.get(key)).toString("base64") };
+    } catch (err) {
+      this.options.logger.warn({ err: errString(err) }, "catalog image read failed");
       return null;
     }
   }

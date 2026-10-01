@@ -32,6 +32,8 @@ const WorkerEnvSchema = LlmEnvSchema.extend({
   BLOB_CONNECTION_STRING: z.string().min(1).optional(),
   BLOB_ACCOUNT_URL: z.url().optional(),
   BLOB_CONTAINER_SCANS: z.string().default("scans"),
+  /** Catalog reference photos (keys in product_dimensions rows migrated from Supabase). */
+  BLOB_CONTAINER_CATALOG: z.string().default("catalog-images"),
   /** How often the outbox is drained when it was empty last time. */
   OUTBOX_POLL_MS: z.coerce.number().int().min(50).max(60_000).default(1000),
   MEDIA_CONCURRENCY: z.coerce.number().int().min(1).max(32).default(2),
@@ -80,7 +82,7 @@ export interface WorkerConfig {
     connectionString: string | null;
     accountUrl: string | null;
     publicEndpoint: null;
-    containers: { scans: string };
+    containers: { scans: string; catalogImages: string };
   };
   outboxPollMs: number;
   concurrency: {
@@ -153,7 +155,7 @@ export function loadWorkerConfig(
         (e.BLOB_ACCOUNT_URL ? null : (local?.blob.connectionString ?? null)),
       accountUrl: e.BLOB_ACCOUNT_URL ?? null,
       publicEndpoint: null,
-      containers: { scans: e.BLOB_CONTAINER_SCANS },
+      containers: { scans: e.BLOB_CONTAINER_SCANS, catalogImages: e.BLOB_CONTAINER_CATALOG },
     },
     outboxPollMs: e.OUTBOX_POLL_MS,
     concurrency: {

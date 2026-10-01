@@ -8,3 +8,6 @@ coverage/
 !.env.example
 .DS_Store
 *.log
+
+# Blob-copy manifests (tools/supabase-migration); keep them outside the repo
+*.manifest.jsonl

@@ -2,12 +2,12 @@
 
 **Target:** TanStack (frontend) · NestJS on Fastify (backend) · PostgreSQL · Azure Blob Storage (Azurite locally) · Redis
 
-|              |                                                                                                                                        |
-| ------------ | -------------------------------------------------------------------------------------------------------------------------------------- |
-| Status       | Draft v3 (decisions D1–D15 in §20). Phases 0–5 built (phase 5 not yet deployed); the web app is in its own repo (D15). See the READMEs |
-| Date         | 2026-09-30                                                                                                                             |
-| Scope        | Re-platform Spatial Capture from TanStack Start + Supabase to a separated frontend and backend that can serve ~1M registered users     |
-| Out of scope | Changing the capture UX, the reconstruction algorithm, or the prompts (they move as-is)                                                |
+|              |                                                                                                                                                                                           |
+| ------------ | ----------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
+| Status       | Draft v3 (decisions D1–D15 in §20). Phases 0–5 built (not yet deployed); phase 6 tooling and runbook ready, cutover pending D8/D13. The web app is in its own repo (D15). See the READMEs |
+| Date         | 2026-09-30                                                                                                                                                                                |
+| Scope        | Re-platform Spatial Capture from TanStack Start + Supabase to a separated frontend and backend that can serve ~1M registered users                                                        |
+| Out of scope | Changing the capture UX, the reconstruction algorithm, or the prompts (they move as-is)                                                                                                   |
 
 ---
 
@@ -955,6 +955,18 @@ Each phase ends with a working, deployable system. Sizes are relative (S < M < L
 - See §18.2. Rehearse on staging with a production snapshot at least twice.
 
 **Exit:** production on the new platform; Supabase kept read-only for a rollback window, then decommissioned.
+
+**As built so far** (tooling and runbook; the cutover itself hasn't happened):
+
+- **`tools/supabase-migration`**: `preflight`, `tables --yes`, `blobs` and `verify [--deep]`. Steps and settings are in `docs/cutover-runbook.md`.
+  - Accounts come from `auth.users` with the same UUIDs and their bcrypt hashes. OAuth-only accounts arrive without a password, and banned or deleted ones arrive disabled.
+  - The new schema kept every Supabase column, so the `public` tables copy column for column, in foreign-key order, with `COPY`. Each run replaces the target's copy in one transaction, from one repeatable-read snapshot, so the final run in the read-only window is exact, deletions included.
+  - Supabase's public catalog photo URLs become keys in the private `catalog-images` container, and the worker reads them from there.
+  - `verify` compares row counts and an MD5 over every row's text form, in primary-key order, on both sides.
+- **Files** stream from the Storage API (service-role key) to the Azure container of the same name, under the same key. Each copy is checked against the source size and MD5 (when the ETag is an MD5), and Azure keeps the MD5. A JSON-lines manifest of ETags makes the bulk copy resumable and the cutover delta incremental. `verify --deep` checks every blob's size and MD5 in Azure.
+- **Preflight** stops on source columns the new schema lacks (schema drift), email-less accounts that own data, and emails that collide when case is ignored. It warns about password-less accounts (D13), rows pointing at missing files, spaces mid-analysis, and target data that would be replaced.
+- **Tested** end to end (`src/migration.int.test.ts`) against a source built from the Supabase schema (`fixtures/supabase-source.sql`, the Lovable migrations on Supabase stand-ins), with a fake Storage API, a migrated target and Azurite. It covers the bulk copy, the delta, deletions arriving, checksum mismatches, a retried 503, an MD5 mismatch, and drift. Writing it found that Supabase's profile trigger gives anonymous accounts profiles; those are now left behind with the account.
+- **Still to do:** decide D8 and D13, deploy staging and production, rehearse twice with production data, then cut over.
 
 ---
 

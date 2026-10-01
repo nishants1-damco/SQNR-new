@@ -1,0 +1,31 @@
+{
+  "name": "@spatial/supabase-migration",
+  "version": "0.0.0",
+  "private": true,
+  "description": "Moves users, rows and files from the Supabase project to the new platform (migration plan §18.2).",
+  "type": "module",
+  "scripts": {
+    "migrate": "tsx src/cli.ts",
+    "typecheck": "tsc -p tsconfig.json",
+    "lint": "eslint .",
+    "test": "vitest run --passWithNoTests",
+    "test:integration": "vitest run --config vitest.integration.config.ts"
+  },
+  "dependencies": {
+    "@azure/storage-blob": "^12.34.0",
+    "@spatial/config": "workspace:*",
+    "@spatial/storage": "workspace:*",
+    "pg": "^8.23.0",
+    "pg-copy-streams": "^7.0.0"
+  },
+  "devDependencies": {
+    "@spatial/db": "workspace:*",
+    "@spatial/eslint-config": "workspace:*",
+    "@spatial/tsconfig": "workspace:*",
+    "@types/node": "^24.19.0",
+    "@types/pg": "^8.23.1",
+    "@types/pg-copy-streams": "^1.2.5",
+    "bcryptjs": "^3.0.3",
+    "tsx": "^4.23.15"
+  }
+}
