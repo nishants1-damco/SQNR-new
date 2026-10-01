@@ -1,8 +1,8 @@
 # Spatial Capture Platform
 
-The re-platformed Spatial Capture: a TanStack web app, a NestJS/Fastify API and a NestJS worker, on PostgreSQL (PostGIS + pgvector), Redis and Azure Blob Storage. The design and phased roadmap are in [docs/architecture/scaling-migration-plan.md](docs/architecture/scaling-migration-plan.md).
+The re-platformed Spatial Capture's backend: a NestJS/Fastify API and a NestJS worker, on PostgreSQL (PostGIS + pgvector), Redis and Azure Blob Storage. The TanStack web app that uses it is [SQNR-web](https://github.com/nishants1-damco/SQNR-web). The design and phased roadmap are in [docs/architecture/scaling-migration-plan.md](docs/architecture/scaling-migration-plan.md).
 
-**Status: phase 3 (analysis worker).** Auth, spaces (scans), direct-to-Blob frame uploads, exports, geocoding, consent and feature flags run in the API. The reconstruction pipeline runs in the worker as a checkpointed job on Claude Opus 5.5 (or a local Qwen model in development), queued by the API and followed over SSE. The web app arrives in phase 4; see [What's next](#whats-next).
+**Status: phase 5 built, not yet deployed.** Auth, spaces (scans), direct-to-Blob frame uploads, exports, geocoding, consent, feature flags and account deletion run in the API. The reconstruction pipeline runs in the worker as a checkpointed job on Claude Opus 5.5 (or a local Qwen model in development), queued by the API and followed over SSE. Phase 5 added Redis quotas and throttling, AI spend caps, read-replica routing, OpenTelemetry, container images, Azure Bicep with a deploy pipeline, and a [security review](docs/security-review.md). The web app is its own repo, [SQNR-web](https://github.com/nishants1-damco/SQNR-web). See [What's next](#whats-next).
 
 ## Layout
 
@@ -17,12 +17,16 @@ packages/
   storage/               BlobStore on Azure Blob Storage / Azurite              @spatial/storage
   domain/                pure geometry, solvers, reconciliation                 @spatial/domain/<module>
   pipeline/              reconstruction pipeline, model providers, prompts      @spatial/pipeline
+  observability/         OpenTelemetry setup, trace propagation, app metrics    @spatial/observability
   tsconfig/              shared TypeScript settings (strict)
   eslint-config/         shared ESLint flat configs
 tools/dev-infra/         init and end-to-end check of the local stack
 tools/eval/              reconstruction eval harness and fixtures               @spatial/eval
-infra/docker/            Docker Compose: Postgres, PgBouncer, Redis, Azurite, Mailpit, Ollama
-docs/                    migration plan, porting ledger
+infra/docker/            Docker Compose: Postgres, PgBouncer, Redis, Azurite, Mailpit, Ollama, Grafana LGTM;
+                         app.Dockerfile (API and worker images)
+infra/azure/             Bicep for staging and production (see its README)
+tests/load/              k6 load-test scripts
+docs/                    migration plan, porting ledger, security review
 ```
 
 `@spatial/domain` has no barrel file; import each module by subpath, e.g. `import { shellFromRanges } from "@spatial/domain/wall-ranges"`. It must stay free of I/O and runtime-specific globals so web, api and worker can all use it; its lint config enforces that.
@@ -64,37 +68,38 @@ pnpm format             # Prettier
 
 Every route needs a bearer access token unless it's marked `@Public()`. Errors always use the envelope `{ code, message, details? }` from `@spatial/contracts`.
 
-| Route                                            | Access         | What it does                                                                                                                                     |
-| ------------------------------------------------ | -------------- | ------------------------------------------------------------------------------------------------------------------------------------------------ |
-| `POST /v1/auth/sign-up`                          | public         | Creates the account and signs in (201). Sends a verification email; verifying is not required to sign in, as with the Supabase setup it replaces |
-| `POST /v1/auth/sign-in`                          | public         | Email + password. Accounts imported from Supabase keep working (bcrypt, re-hashed to Argon2id on sign-in)                                        |
-| `POST /v1/auth/refresh`                          | refresh cookie | New access token; rotates the refresh cookie. Replaying an old refresh token ends that session everywhere                                        |
-| `POST /v1/auth/sign-out`                         | refresh cookie | Ends the session and clears the cookie                                                                                                           |
-| `POST /v1/auth/verify-email`                     | public         | Redeems the emailed verification link                                                                                                            |
-| `POST /v1/auth/verify-email/resend`              | token          | Sends a new verification email                                                                                                                   |
-| `POST /v1/auth/password-reset`                   | public         | Always 202, so it can't reveal which emails have accounts                                                                                        |
-| `POST /v1/auth/password-reset/confirm`           | public         | Sets the new password and signs out every session                                                                                                |
-| `GET /v1/me`                                     | token          | The signed-in user                                                                                                                               |
-| `GET /.well-known/jwks.json`                     | public         | Public keys for verifying access tokens                                                                                                          |
-| `GET /health/live`, `GET /health/ready`          | public         | Liveness; readiness checks Postgres and Redis                                                                                                    |
-| `GET /v1/scans`                                  | token          | The caller's spaces: `q` (name, summary, address), `status`, `sort` (`newest`, `oldest`, `name`, `area`), cursor pages, totals, thumbnails       |
-| `POST /v1/scans`                                 | token          | Creates a draft space with its capture data. Repeating a `captureId` returns the same space (200)                                                |
-| `GET /v1/scans/:id`                              | token          | The space with its objects, portals, surfaces and frames (with read URLs)                                                                        |
-| `PATCH /v1/scans/:id`                            | token          | Name, notes, and capture-owned `analysis_notes` keys (merged; server-written keys are kept)                                                      |
-| `DELETE /v1/scans/:id`                           | token          | Deletes the space and everything tied to it; its files are removed by the worker. Consent records are kept                                       |
-| `DELETE /v1/scans/:id/photos/:photoId`           | token          | Removes one frame and records why in `analysis_notes.frame_removals`                                                                             |
-| `POST /v1/scans/:id/uploads`                     | token          | Signs one create-only upload URL per file (frames, one depth file)                                                                               |
-| `POST /v1/scans/:id/uploads/:sessionId/complete` | token          | Checks each uploaded blob, records the frames (optionally replacing reshot viewpoints) and the depth file                                        |
-| `POST /v1/scans/photo-urls`                      | token          | Read URLs for the caller's own blobs; anything else is reported missing                                                                          |
-| `GET /v1/scans/:id/export`                       | token          | GeoJSON, PostGIS rows, the layer bundle, IMDF and OpenUSD; `?format=` for one                                                                    |
-| `POST /v1/scans/:id/address`                     | token          | Reverse-geocodes the GPS fix and stores the street address                                                                                       |
-| `GET /v1/geocode?address=`                       | token          | Coordinates for a typed address                                                                                                                  |
-| `POST /v1/consents`                              | token          | Records capture consent, once per capture session                                                                                                |
-| `GET /v1/flags`                                  | token          | The caller's feature flags (per-user overrides win over global defaults)                                                                         |
-| `POST /v1/scans/:id/analysis`                    | token          | Queues an analysis (202). 200 with `already_running` or `duplicate` for a run in progress or a repeated capture id. 5 per hour and 20 per day    |
-| `GET /v1/scans/:id/analysis`                     | token          | The run's stage, progress, deadline and error, and the latest run record (attempts, cost)                                                        |
-| `GET /v1/scans/:id/analysis/events`              | token          | Server-sent events: a `status` snapshot, then `progress` until `done` or `failed`                                                                |
-| `POST /v1/scans/:id/privacy-purge`               | token          | Queues a re-screen of every frame for people; matches are deleted (202). 10 per hour                                                             |
+| Route                                            | Access         | What it does                                                                                                                                        |
+| ------------------------------------------------ | -------------- | --------------------------------------------------------------------------------------------------------------------------------------------------- |
+| `POST /v1/auth/sign-up`                          | public         | Creates the account and signs in (201). Sends a verification email; verifying is not required to sign in, as with the Supabase setup it replaces    |
+| `POST /v1/auth/sign-in`                          | public         | Email + password. Accounts imported from Supabase keep working (bcrypt, re-hashed to Argon2id on sign-in)                                           |
+| `POST /v1/auth/refresh`                          | refresh cookie | New access token; rotates the refresh cookie. Replaying an old refresh token ends that session everywhere                                           |
+| `POST /v1/auth/sign-out`                         | refresh cookie | Ends the session and clears the cookie                                                                                                              |
+| `POST /v1/auth/verify-email`                     | public         | Redeems the emailed verification link                                                                                                               |
+| `POST /v1/auth/verify-email/resend`              | token          | Sends a new verification email                                                                                                                      |
+| `POST /v1/auth/password-reset`                   | public         | Always 202, so it can't reveal which emails have accounts                                                                                           |
+| `POST /v1/auth/password-reset/confirm`           | public         | Sets the new password and signs out every session                                                                                                   |
+| `GET /v1/me`                                     | token          | The signed-in user                                                                                                                                  |
+| `DELETE /v1/me`                                  | token          | Deletes the account and everything in it after re-checking the password (204). The user's files are removed by the worker; live tokens stop working |
+| `GET /.well-known/jwks.json`                     | public         | Public keys for verifying access tokens                                                                                                             |
+| `GET /health/live`, `GET /health/ready`          | public         | Liveness; readiness checks Postgres and Redis                                                                                                       |
+| `GET /v1/scans`                                  | token          | The caller's spaces: `q` (name, summary, address), `status`, `sort` (`newest`, `oldest`, `name`, `area`), cursor pages, totals, thumbnails          |
+| `POST /v1/scans`                                 | token          | Creates a draft space with its capture data. Repeating a `captureId` returns the same space (200)                                                   |
+| `GET /v1/scans/:id`                              | token          | The space with its objects, portals, surfaces and frames (with read URLs)                                                                           |
+| `PATCH /v1/scans/:id`                            | token          | Name, notes, and capture-owned `analysis_notes` keys (merged; server-written keys are kept)                                                         |
+| `DELETE /v1/scans/:id`                           | token          | Deletes the space and everything tied to it; its files are removed by the worker. Consent records are kept                                          |
+| `DELETE /v1/scans/:id/photos/:photoId`           | token          | Removes one frame and records why in `analysis_notes.frame_removals`                                                                                |
+| `POST /v1/scans/:id/uploads`                     | token          | Signs one create-only upload URL per file (frames, one depth file)                                                                                  |
+| `POST /v1/scans/:id/uploads/:sessionId/complete` | token          | Checks each uploaded blob, records the frames (optionally replacing reshot viewpoints) and the depth file                                           |
+| `POST /v1/scans/photo-urls`                      | token          | Read URLs for the caller's own blobs; anything else is reported missing                                                                             |
+| `GET /v1/scans/:id/export`                       | token          | GeoJSON, PostGIS rows, the layer bundle, IMDF and OpenUSD; `?format=` for one                                                                       |
+| `POST /v1/scans/:id/address`                     | token          | Reverse-geocodes the GPS fix and stores the street address                                                                                          |
+| `GET /v1/geocode?address=`                       | token          | Coordinates for a typed address                                                                                                                     |
+| `POST /v1/consents`                              | token          | Records capture consent, once per capture session                                                                                                   |
+| `GET /v1/flags`                                  | token          | The caller's feature flags (per-user overrides win over global defaults)                                                                            |
+| `POST /v1/scans/:id/analysis`                    | token          | Queues an analysis (202). 200 with `already_running` or `duplicate` for a run in progress or a repeated capture id. 5 per hour and 20 per day       |
+| `GET /v1/scans/:id/analysis`                     | token          | The run's stage, progress, deadline and error, and the latest run record (attempts, cost)                                                           |
+| `GET /v1/scans/:id/analysis/events`              | token          | Server-sent events: a `status` snapshot, then `progress` until `done` or `failed`                                                                   |
+| `POST /v1/scans/:id/privacy-purge`               | token          | Queues a re-screen of every frame for people; matches are deleted (202). 10 per hour                                                                |
 
 Rows keep their database column names (snake_case) and the JSON shape Supabase returned (numbers, ISO timestamps, GeoJSON geometry), so the web app's components port over unchanged.
 
@@ -212,8 +217,18 @@ If Ollama is already installed and running on your machine, port 11434 is taken.
 1. **Checks:** `pnpm format:check`, then lint, typecheck, unit tests and build.
 2. **Integration:** builds, starts the Compose stack, runs `pnpm infra:check`, migrates the dev database, runs `pnpm test:integration` and `pnpm eval` (replay only, no model calls), prints service logs on failure, and tears the stack down.
 
+## Scale and hardening
+
+- **Limits.** Quotas live in Redis (GCRA) and fail closed. Every request is throttled per user, or per IP when anonymous (`THROTTLE_*`). Analyses check queue depth and daily AI spend, per user and globally (`ANALYSIS_MAX_QUEUED`, `AI_DAILY_BUDGET_USD_*`), before they're queued. An exhausted database pool answers 503 with `Retry-After`.
+- **Reads.** With `DATABASE_REPLICA_URL` set, list and detail reads go to the replica, except for a user who wrote in the last `REPLICA_STICKY_SECONDS`.
+- **Telemetry.** Off unless an exporter is configured. `pnpm infra:otel` starts Grafana's LGTM stack on [localhost:3001](http://localhost:3001) with the Spatial overview dashboard. Point the apps at it with `OTEL_EXPORTER_OTLP_ENDPOINT=http://127.0.0.1:4318`. Traces follow a request from the API through the outbox into the worker job and its pipeline stages; log lines carry `trace_id`.
+- **Edge.** In Azure the API trusts two proxy hops (`TRUST_PROXY=2`) and refuses requests without its Front Door id (`FRONT_DOOR_ID`). See [docs/security-review.md](docs/security-review.md).
+- **Deployment.** Images build from `infra/docker/app.Dockerfile` (`--build-arg APP=api|worker`). [infra/azure/README.md](infra/azure/README.md) covers the first deployment, and `.github/workflows/deploy.yml` deploys to staging, then production with an approval step.
+
 ## What's next
 
-Phase 4 (migration plan §17): `apps/web` on TanStack Router + Query, with the routes, components and browser libraries moved from the original app and every Supabase call replaced by the API.
+- Deploy to a subscription for the first time (`infra/azure/README.md`), then run the k6 scripts against staging (`tests/load/README.md`; only a small local read-mix run has been done).
+- The security review's open items (docs/security-review.md): add dependency, image and secret scanning to CI, and an account-deletion page in SQNR-web (run `pnpm shared:sync` there first).
+- Phase 6 (migration plan §17, §18.2): data migration from Supabase and cutover.
 
 Still open from phase 3: record real captures as eval fixtures, then run the Opus 5.5 effort sweep and the cross-pass prompt-caching experiment against them (plan §9.7.3, §9.7.4).

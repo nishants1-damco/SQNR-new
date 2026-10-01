@@ -1,6 +1,8 @@
 // A provider that answers from a script instead of a model: for tests and
 // the eval harness's offline mode. Each reply is chosen by pipeline step.
+import { recordCallMetrics } from "./claude";
 import { CLOUD_BUDGETS, type FrameBudgets, type LlmProvider, type LlmRequest } from "./types";
+import type { LlmCall } from "./usage";
 
 export type ScriptedReply = unknown | ((request: LlmRequest) => unknown);
 
@@ -27,8 +29,8 @@ export class ScriptedProvider implements LlmProvider {
     this.requests.push(request);
     const started = Date.now();
     const reply = this.replies[request.step];
-    const finish = (ok: boolean) =>
-      request.record?.({
+    const finish = (ok: boolean) => {
+      const call: LlmCall = {
         step: request.step,
         provider: this.kind,
         model: request.model,
@@ -40,7 +42,10 @@ export class ScriptedProvider implements LlmProvider {
         cache_creation_input_tokens: 0,
         stop_reason: ok ? "end_turn" : null,
         ok,
-      });
+      };
+      request.record?.(call);
+      recordCallMetrics(call);
+    };
     try {
       if (reply === undefined) throw new Error(`No scripted reply for step "${request.step}"`);
       const value =

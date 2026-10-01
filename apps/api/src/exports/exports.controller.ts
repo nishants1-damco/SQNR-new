@@ -2,9 +2,8 @@
 // FeatureCollection, the raw PostGIS rows with WKT geometry, the
 // self-describing L0–L5 layer bundle, an IMDF archive and an OpenUSD scene.
 // `?format=` returns just one of them.
-import { Controller, Get, Inject, Param, Query } from "@nestjs/common";
+import { Controller, Get, Param, Query } from "@nestjs/common";
 import { ApiBearerAuth, ApiTags } from "@nestjs/swagger";
-import type { Database } from "@spatial/db";
 import { buildImdf, type Json } from "@spatial/domain/imdf";
 import { SPATIAL_ONTOLOGY } from "@spatial/domain/scan-spatial";
 import { buildUsd } from "@spatial/domain/usd";
@@ -12,7 +11,7 @@ import { sql } from "drizzle-orm";
 import type { AuthUser } from "../auth/auth.types";
 import { CurrentUser } from "../auth/current-user.decorator";
 import { ApiError } from "../common/api-error";
-import { DB } from "../database/database.module";
+import { ReadRouter } from "../database/database.module";
 import { ExportQueryDto, ScanParamsDto } from "../scans/scans.dto";
 
 interface RawExport {
@@ -25,7 +24,7 @@ interface RawExport {
 @ApiBearerAuth()
 @Controller("scans/:id/export")
 export class ExportsController {
-  constructor(@Inject(DB) private readonly db: Database) {}
+  constructor(private readonly reads: ReadRouter) {}
 
   @Get()
   async export(
@@ -33,7 +32,8 @@ export class ExportsController {
     @Param() params: ScanParamsDto,
     @Query() query: ExportQueryDto,
   ) {
-    const { rows } = await this.db.execute<{ bundle: RawExport | null }>(
+    const db = await this.reads.forUser(user.id);
+    const { rows } = await db.execute<{ bundle: RawExport | null }>(
       sql`SELECT scan_export(${params.id}, ${user.id}) AS bundle`,
     );
     const raw = rows[0]?.bundle;

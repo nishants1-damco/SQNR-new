@@ -21,6 +21,7 @@ import {
   runAnalysis,
 } from "@spatial/pipeline";
 import type { BlobStore } from "@spatial/storage";
+import { appMetrics } from "@spatial/observability";
 import { type Job, UnrecoverableError } from "bullmq";
 import type { Redis } from "ioredis";
 import { InjectPinoLogger, PinoLogger } from "nestjs-pino";
@@ -53,9 +54,15 @@ export class AnalysisRunner {
     const run = { analysisId: data.analysisId, scanId: data.scanId, userId: data.userId };
     const attempts = job.opts.attempts ?? 1;
     const lastAttempt = job.attemptsMade + 1 >= attempts;
+    const metrics = appMetrics();
+    const started = Date.now();
+    const attrs = { provider: data.provider };
+    if (job.attemptsMade === 0 && job.timestamp) {
+      metrics.queueWait.record((started - job.timestamp) / 1000, attrs);
+    }
     try {
       const provider = this.providers.create(data.provider, data.model);
-      return await runAnalysis(
+      const outcome = await runAnalysis(
         {
           store: this.store,
           blobs: this.blobs,
@@ -67,6 +74,12 @@ export class AnalysisRunner {
         },
         run,
       );
+      metrics.analysisRuns.add(1, { ...attrs, outcome: outcome.status });
+      metrics.analysisDuration.record((Date.now() - started) / 1000, {
+        ...attrs,
+        outcome: outcome.status,
+      });
+      return outcome;
     } catch (err) {
       const cause = err instanceof AnalysisRunError ? err.cause : err;
       const usage = err instanceof AnalysisRunError ? err.usage : null;
@@ -76,6 +89,11 @@ export class AnalysisRunner {
         { err: cause, ...run, attempt: job.attemptsMade + 1, attempts, retry },
         "analysis attempt failed",
       );
+      metrics.analysisRuns.add(1, { ...attrs, outcome: retry ? "retrying" : "failed" });
+      metrics.analysisDuration.record((Date.now() - started) / 1000, {
+        ...attrs,
+        outcome: retry ? "retrying" : "failed",
+      });
       if (retry) {
         await this.store.setStage(run, "retrying", 0).catch(() => undefined);
         await this.publish({ ...run, stage: "retrying", pct: 0, message: "Retrying shortly" });

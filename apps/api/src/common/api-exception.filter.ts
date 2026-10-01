@@ -26,6 +26,15 @@ const STATUS_CODES: Partial<Record<number, ErrorCode>> = {
   503: "service_unavailable",
 };
 
+/** node-postgres's message when no pooled connection frees up in time; Drizzle wraps it as the cause. */
+function isPoolExhausted(exception: unknown): boolean {
+  for (let e = exception, depth = 0; e instanceof Error && depth < 4; depth++) {
+    if (e.message === "timeout exceeded when trying to connect") return true;
+    e = e.cause;
+  }
+  return false;
+}
+
 @Catch()
 export class ApiExceptionFilter implements ExceptionFilter {
   // pino directly (not Nest's Logger bridge): server errors must never be lost.
@@ -92,6 +101,17 @@ export class ApiExceptionFilter implements ExceptionFilter {
           ? `No route for ${request.method} ${request.url.split("?")[0]}`
           : exception.message;
       return { status, body: { code, message } };
+    }
+
+    // Every database connection busy for the pool's wait limit: shed load with
+    // a retryable 503 rather than a 500 (plan §18.1 load tests).
+    if (isPoolExhausted(exception)) {
+      this.logger.warn({ reqId: request.id }, "database pool exhausted");
+      return {
+        status: 503,
+        body: { code: "service_unavailable", message: "The service is busy. Try again shortly." },
+        retryAfter: 1,
+      };
     }
 
     // Fastify's own errors (bad JSON, body too large, unsupported media type).

@@ -20,13 +20,15 @@ export function createDatabase(options: {
   /** Per-process pool size. Keep small: PgBouncer multiplexes (plan §8.4). */
   max?: number;
   applicationName?: string;
+  /** How long a query waits for a free connection before failing. */
+  connectionTimeoutMs?: number;
 }): DatabaseHandle {
   const pool = new pg.Pool({
     connectionString: options.url,
     max: options.max ?? 10,
     application_name: options.applicationName ?? "spatial",
     idleTimeoutMillis: 30_000,
-    connectionTimeoutMillis: 5_000,
+    connectionTimeoutMillis: options.connectionTimeoutMs ?? 5_000,
   });
   const db = drizzle(pool, { schema });
   return { pool, db, close: () => pool.end() };

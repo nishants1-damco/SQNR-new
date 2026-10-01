@@ -1,6 +1,7 @@
 // Progress events from the worker to open SSE streams (plan §9.6). One Redis
 // subscriber per API process fans each scan's channel out to its streams, so
 // a thousand open streams cost one connection, not a thousand.
+import { appMetrics } from "@spatial/observability";
 import { Inject, Injectable, type OnApplicationShutdown } from "@nestjs/common";
 import type { ApiConfig } from "@spatial/config";
 import { analysisEventsChannel } from "@spatial/contracts";
@@ -33,11 +34,13 @@ export class AnalysisEventsHub implements OnApplicationShutdown {
   tryOpenStream(): boolean {
     if (this.open >= this.config.analysis.maxStreams) return false;
     this.open++;
+    appMetrics().sseStreams.add(1);
     return true;
   }
 
   closeStream() {
     this.open = Math.max(0, this.open - 1);
+    appMetrics().sseStreams.add(-1);
   }
 
   /** Listens to one scan's events; resolves once subscribed. Returns the unsubscribe function. */

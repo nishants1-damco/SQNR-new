@@ -12,12 +12,29 @@
 // Every call also passes through the LlmGate (global permits and token
 // buckets) and records its usage.
 import Anthropic from "@anthropic-ai/sdk";
+import { appMetrics } from "@spatial/observability";
 import { errString, type PipelineLogger, silentLogger } from "../logger";
 import { estimateInputTokens, splitPipelineMessages, toClaudeContent } from "./content";
 import { LlmError } from "./errors";
 import type { LlmGate } from "./gate";
 import { CLOUD_BUDGETS, type LlmProvider, type LlmRequest } from "./types";
-import type { LlmCall } from "./usage";
+import { estimateCostUsd, type LlmCall } from "./usage";
+
+/** Calls, tokens and spend per model and step (plan §16.1). */
+export function recordCallMetrics(call: LlmCall): void {
+  const m = appMetrics();
+  const attrs = { model: call.served_model, step: call.step, provider: call.provider };
+  m.llmCalls.add(1, { ...attrs, ok: call.ok });
+  const tokens: [string, number][] = [
+    ["input", call.input_tokens],
+    ["output", call.output_tokens],
+    ["cache_read", call.cache_read_input_tokens],
+    ["cache_write", call.cache_creation_input_tokens],
+  ];
+  for (const [kind, n] of tokens) if (n) m.llmTokens.add(n, { ...attrs, kind });
+  const cost = estimateCostUsd([call]);
+  if (cost) m.llmCost.add(cost, attrs);
+}
 
 /** Beta that enables `fallbacks` on the Messages API (not available on Batches). */
 export const REFUSAL_FALLBACK_BETA = "server-side-fallback-2026-07-01";
@@ -100,6 +117,7 @@ export class ClaudeProvider implements LlmProvider {
         ok,
       };
       request.record?.(call);
+      recordCallMetrics(call);
       const fields = {
         step: call.step,
         model: call.served_model,
@@ -129,7 +147,10 @@ export class ClaudeProvider implements LlmProvider {
         );
         return this.complete({ ...request, schema: undefined });
       }
-      if (err instanceof Anthropic.RateLimitError) await this.options.gate.penalize("claude");
+      if (err instanceof Anthropic.RateLimitError) {
+        appMetrics().llmRateLimited.add(1, { model: request.model });
+        await this.options.gate.penalize("claude");
+      }
       throw this.friendlyError(err);
     }
 

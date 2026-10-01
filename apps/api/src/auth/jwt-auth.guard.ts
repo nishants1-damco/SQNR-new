@@ -4,6 +4,7 @@ import { Reflector } from "@nestjs/core";
 import type { FastifyRequest } from "fastify";
 import { ApiError } from "../common/api-error";
 import { IS_PUBLIC } from "./public.decorator";
+import { RevokedUsers } from "./revoked-users";
 import { InvalidAccessToken, TokensService } from "./tokens.service";
 
 @Injectable()
@@ -11,6 +12,7 @@ export class JwtAuthGuard implements CanActivate {
   constructor(
     private readonly reflector: Reflector,
     private readonly tokens: TokensService,
+    private readonly revoked: RevokedUsers,
   ) {}
 
   async canActivate(context: ExecutionContext): Promise<boolean> {
@@ -32,6 +34,9 @@ export class JwtAuthGuard implements CanActivate {
         throw ApiError.unauthorized("Your session has expired. Sign in again.");
       }
       throw err;
+    }
+    if (await this.revoked.isRevoked(request.user.id)) {
+      throw ApiError.unauthorized("This account no longer exists");
     }
     return true;
   }

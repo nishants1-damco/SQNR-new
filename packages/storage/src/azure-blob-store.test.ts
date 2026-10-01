@@ -30,6 +30,13 @@ describe("AzureBlobStore signing (no network)", () => {
     expect(url.searchParams.get("sp")).toBe("r");
   });
 
+  it("encodes each path segment of the key the way the SDK's BlobClient does", async () => {
+    const store = new AzureBlobStore({ container: "scans", connectionString: devConnection });
+    const key = "u/s/depth/ab12-room scan#1+ü.ply";
+    const signed = new URL(await store.presignGet(key, { expiresInSec: 60 }));
+    expect(signed.origin + signed.pathname).toBe(store.container.getBlobClient(key).url);
+  });
+
   it("needs a connection string or an account URL with a credential", () => {
     expect(() => new AzureBlobStore({ container: "scans" })).toThrow(/connection string/);
   });

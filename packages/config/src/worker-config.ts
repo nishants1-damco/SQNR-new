@@ -2,7 +2,13 @@
 // defaults outside production, explicit settings required in production.
 import { z } from "zod";
 import { ConfigError } from "./api-config";
-import { llmConfigProblems, LlmEnvSchema, llmModels, type LlmModelsConfig } from "./llm-config";
+import {
+  booleanString,
+  llmConfigProblems,
+  LlmEnvSchema,
+  llmModels,
+  type LlmModelsConfig,
+} from "./llm-config";
 import { localStack } from "./local-stack";
 
 const csv = z.string().transform((value) =>
@@ -56,6 +62,13 @@ const WorkerEnvSchema = LlmEnvSchema.extend({
   GEMINI_API_KEY: z.string().min(1).optional(),
   /** Origins catalog reference photos may be downloaded from (https only). */
   CATALOG_IMAGE_ORIGINS: csv.default([]),
+
+  /** development | staging | production: where this runs, beyond NODE_ENV. */
+  DEPLOY_ENV: z.enum(["development", "staging", "production"]).optional(),
+  /** Load tests (plan §18.1): a stand-in model with latency and 429s. Refused in production. */
+  LLM_STUB: booleanString.default(false),
+  LLM_STUB_LATENCY_MS: z.coerce.number().int().min(0).default(60_000),
+  LLM_STUB_429_RATE: z.coerce.number().min(0).max(1).default(0.02),
 });
 
 export interface WorkerConfig {
@@ -94,6 +107,8 @@ export interface WorkerConfig {
     baseUrl: string;
   };
   catalogImageOrigins: string[];
+  /** Load-test model stub, or null. */
+  llmStub: { latencyMs: number; rateLimitRate: number } | null;
 }
 
 export function loadWorkerConfig(
@@ -108,6 +123,12 @@ export function loadWorkerConfig(
   const e = parsed.data;
   const production = e.NODE_ENV === "production";
   const llmProblems = llmConfigProblems(e, production);
+  if (
+    e.LLM_STUB &&
+    (e.DEPLOY_ENV ?? (production ? "production" : "development")) === "production"
+  ) {
+    llmProblems.push("LLM_STUB: the load-test model stub is refused in production");
+  }
   if (llmProblems.length) throw new ConfigError(llmProblems);
   if (production) {
     const problems: string[] = [];
@@ -171,5 +192,8 @@ export function loadWorkerConfig(
       baseUrl: localBaseUrl,
     },
     catalogImageOrigins: e.CATALOG_IMAGE_ORIGINS.map((origin) => new URL(origin).origin),
+    llmStub: e.LLM_STUB
+      ? { latencyMs: e.LLM_STUB_LATENCY_MS, rateLimitRate: e.LLM_STUB_429_RATE }
+      : null,
   };
 }

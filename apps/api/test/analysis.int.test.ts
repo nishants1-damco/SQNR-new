@@ -12,6 +12,7 @@ import { Redis } from "ioredis";
 import pg from "pg";
 import { afterAll, beforeAll, describe, expect, it } from "vitest";
 import { createScan, signUp, uploadFrames, type User } from "./helpers/spaces";
+import { REDIS } from "../src/redis/redis.module";
 import { startTestApp, type TestApp } from "./helpers/test-app";
 
 let t: TestApp;
@@ -156,11 +157,8 @@ describe("POST /v1/scans/:id/analysis", () => {
     const res = await start(user, scan.id);
     expect(res.status).toBe(409);
     expect(res.body.code).toBe("conflict");
-    const quota = await admin.query(
-      "SELECT count(*)::int AS n FROM user_rate_limits WHERE user_id = $1",
-      [user.id],
-    );
-    expect(quota.rows[0].n).toBe(0);
+    const redis = t.app.get<Redis>(REDIS);
+    expect(await redis.exists(`ratelimit:quota:analyze_scan:${user.id}`)).toBe(0);
   });
 
   it("queues local-model runs on their own queue", async () => {

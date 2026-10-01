@@ -21,7 +21,7 @@ import { Public } from "./public.decorator";
 
 /** HttpOnly refresh cookie, only ever sent to /v1/auth/* (plan §10.2). */
 export const REFRESH_COOKIE = "sc_refresh";
-const REFRESH_COOKIE_PATH = "/v1/auth";
+export const REFRESH_COOKIE_PATH = "/v1/auth";
 
 function clientInfo(request: FastifyRequest): ClientInfo {
   const userAgent = request.headers["user-agent"];

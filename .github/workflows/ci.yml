@@ -26,6 +26,16 @@ jobs:
       - run: pnpm install --frozen-lockfile
       - run: pnpm format:check
       - run: pnpm check
+      # The Azure templates compile and pass the Bicep linter.
+      - run: az bicep build --file infra/azure/main.bicep --stdout > /dev/null
+
+  images:
+    name: Container images build
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - run: docker build -f infra/docker/app.Dockerfile --build-arg APP=api -t spatial-api:ci .
+      - run: docker build -f infra/docker/app.Dockerfile --build-arg APP=worker -t spatial-worker:ci .
 
   integration:
     name: Local stack + integration tests

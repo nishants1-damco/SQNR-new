@@ -3,6 +3,9 @@
   "version": "0.0.0",
   "private": true,
   "description": "Spatial Capture background worker: outbox relay, analysis pipeline and BullMQ jobs (NestJS application context).",
+  "files": [
+    "dist"
+  ],
   "scripts": {
     "dev": "nest start --watch",
     "build": "nest build",
@@ -15,10 +18,12 @@
   "dependencies": {
     "@nestjs/common": "^11.2.6",
     "@nestjs/core": "^11.2.6",
+    "@opentelemetry/api": "^1.9.1",
     "@spatial/config": "workspace:*",
     "@spatial/contracts": "workspace:*",
     "@spatial/db": "workspace:*",
     "@spatial/domain": "workspace:*",
+    "@spatial/observability": "workspace:*",
     "@spatial/pipeline": "workspace:*",
     "@spatial/storage": "workspace:*",
     "bullmq": "^6.3.10",

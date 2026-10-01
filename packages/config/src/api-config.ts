@@ -24,8 +24,22 @@ const ApiEnvSchema = LlmEnvSchema.extend({
   HOST: z.string().default("0.0.0.0"),
   PORT: z.coerce.number().int().min(1).max(65535).default(3000),
   LOG_LEVEL: z.enum(["fatal", "error", "warn", "info", "debug", "trace", "silent"]).default("info"),
-  /** Set when running behind Front Door / a load balancer, so client IPs are real. */
-  TRUST_PROXY: booleanString.default(false),
+  /**
+   * Proxies in front of the API whose X-Forwarded-For entries are believed: a
+   * hop count (Azure: 2, Front Door then the Container Apps ingress), or
+   * true/false. `true` trusts every entry, so clients could pick their own IP
+   * for rate limits; it is refused in production.
+   */
+  TRUST_PROXY: z
+    .union([z.enum(["true", "false"]), z.coerce.number().int().min(0).max(10)])
+    .default("false")
+    .transform((v) => (v === "true" ? true : v === "false" ? false : v)),
+  /**
+   * Front Door profile id. When set, requests without a matching X-Azure-FDID
+   * header are refused, so the API can't be reached around Front Door (and
+   * its WAF) or have X-Forwarded-For spoofed. Health probes are exempt.
+   */
+  FRONT_DOOR_ID: z.uuid().optional(),
 
   DATABASE_URL: z.url().optional(),
   DATABASE_REPLICA_URL: z.url().optional(),
@@ -41,6 +55,25 @@ const ApiEnvSchema = LlmEnvSchema.extend({
     .default("spatial"),
   /** Open analysis event streams one API replica serves at most. */
   SSE_MAX_STREAMS: z.coerce.number().int().min(1).max(100_000).default(2000),
+  /** Reads go to the primary for this long after a user's write (read-your-writes). */
+  REPLICA_STICKY_SECONDS: z.coerce.number().int().min(0).max(300).default(10),
+  /** Connections per pool (primary and replica each). PgBouncer multiplexes them. */
+  DATABASE_POOL_MAX: z.coerce.number().int().min(1).max(200).default(20),
+  /** How long a request waits for a free connection before a 503. */
+  DATABASE_POOL_WAIT_MS: z.coerce.number().int().min(100).default(2000),
+
+  /** Where per-user quotas are counted: Redis (default) or the original SQL function. */
+  QUOTA_BACKEND: z.enum(["redis", "postgres"]).default("redis"),
+  /** Requests per minute per signed-in user, and per IP for anonymous routes; 0 = off. */
+  THROTTLE_USER_PER_MINUTE: z.coerce.number().int().min(0).default(300),
+  THROTTLE_IP_PER_MINUTE: z.coerce.number().int().min(0).default(60),
+  /** Daily AI spend caps in USD (plan §9.7.6); 0 = no cap. */
+  AI_DAILY_BUDGET_USD_PER_USER: z.coerce.number().min(0).default(25),
+  AI_DAILY_BUDGET_USD_GLOBAL: z.coerce.number().min(0).default(0),
+  /** What a queued or running analysis is assumed to cost until it reports its real cost. */
+  ANALYSIS_COST_ESTIMATE_USD: z.coerce.number().min(0).default(5.2),
+  /** Refuse new analyses with 503 while this many are waiting (plan §9.3); 0 = no limit. */
+  ANALYSIS_MAX_QUEUED: z.coerce.number().int().min(0).default(500),
 
   WEB_ORIGINS: csv.default(["http://localhost:5173"]),
   /** Where emailed links point (the web app). */
@@ -82,8 +115,16 @@ export interface ApiConfig {
   host: string;
   port: number;
   logLevel: string;
-  trustProxy: boolean;
-  database: { url: string; replicaUrl: string };
+  trustProxy: boolean | number;
+  /** Requests must carry this X-Azure-FDID; null to accept any. */
+  frontDoorId: string | null;
+  database: {
+    url: string;
+    replicaUrl: string;
+    replicaStickySeconds: number;
+    poolMax: number;
+    poolWaitMs: number;
+  };
   redis: { cacheUrl: string; keyPrefix: string };
   web: { origins: string[]; appBaseUrl: string };
   auth: {
@@ -105,7 +146,12 @@ export interface ApiConfig {
   };
   geocoder: { provider: "nominatim" | "fake" | "disabled"; userAgent: string };
   queue: { redisUrl: string; prefix: string };
-  analysis: LlmModelsConfig & { maxStreams: number };
+  analysis: LlmModelsConfig & { maxStreams: number; maxQueued: number };
+  limits: {
+    quotaBackend: "redis" | "postgres";
+    throttle: { userPerMinute: number; ipPerMinute: number };
+    budgets: { perUserDailyUsd: number; globalDailyUsd: number; runEstimateUsd: number };
+  };
 }
 
 export class ConfigError extends Error {
@@ -141,6 +187,14 @@ export function loadApiConfig(env: Record<string, string | undefined> = process.
       if (!e[name]) problems.push(`${name}: required in production`);
     }
     if (e.COOKIE_SECURE === false) problems.push("COOKIE_SECURE: must not be false in production");
+    if (e.TRUST_PROXY === true) {
+      problems.push("TRUST_PROXY: use a hop count in production, not true (spoofable client IPs)");
+    }
+    if (typeof e.TRUST_PROXY === "number" && e.TRUST_PROXY > 0 && !e.FRONT_DOOR_ID) {
+      problems.push(
+        "FRONT_DOOR_ID: required with a TRUST_PROXY hop count in production (direct clients could forge X-Forwarded-For)",
+      );
+    }
     if (!e.BLOB_ACCOUNT_URL && !e.BLOB_CONNECTION_STRING) {
       problems.push("BLOB_ACCOUNT_URL: required in production (or BLOB_CONNECTION_STRING)");
     }
@@ -163,7 +217,14 @@ export function loadApiConfig(env: Record<string, string | undefined> = process.
     port: e.PORT,
     logLevel: e.LOG_LEVEL,
     trustProxy: e.TRUST_PROXY,
-    database: { url: databaseUrl, replicaUrl: e.DATABASE_REPLICA_URL ?? databaseUrl },
+    frontDoorId: e.FRONT_DOOR_ID ?? null,
+    database: {
+      url: databaseUrl,
+      replicaUrl: e.DATABASE_REPLICA_URL ?? databaseUrl,
+      replicaStickySeconds: e.REPLICA_STICKY_SECONDS,
+      poolMax: e.DATABASE_POOL_MAX,
+      poolWaitMs: e.DATABASE_POOL_WAIT_MS,
+    },
     redis: { cacheUrl: e.REDIS_CACHE_URL ?? local?.redisUrl ?? "", keyPrefix: e.REDIS_KEY_PREFIX },
     web: { origins: e.WEB_ORIGINS, appBaseUrl: e.APP_BASE_URL.replace(/\/$/, "") },
     auth: {
@@ -193,7 +254,23 @@ export function loadApiConfig(env: Record<string, string | undefined> = process.
     },
     geocoder: { provider: e.GEOCODER_PROVIDER, userAgent: e.GEOCODER_USER_AGENT },
     queue: { redisUrl: e.REDIS_QUEUE_URL ?? local?.redisUrl ?? "", prefix: e.QUEUE_PREFIX },
-    analysis: { ...llmModels(e, production), maxStreams: e.SSE_MAX_STREAMS },
+    analysis: {
+      ...llmModels(e, production),
+      maxStreams: e.SSE_MAX_STREAMS,
+      maxQueued: e.ANALYSIS_MAX_QUEUED,
+    },
+    limits: {
+      quotaBackend: e.QUOTA_BACKEND,
+      throttle: {
+        userPerMinute: e.THROTTLE_USER_PER_MINUTE,
+        ipPerMinute: e.THROTTLE_IP_PER_MINUTE,
+      },
+      budgets: {
+        perUserDailyUsd: e.AI_DAILY_BUDGET_USD_PER_USER,
+        globalDailyUsd: e.AI_DAILY_BUDGET_USD_GLOBAL,
+        runEstimateUsd: e.ANALYSIS_COST_ESTIMATE_USD,
+      },
+    },
   };
 }
 

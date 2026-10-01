@@ -1,6 +1,6 @@
 import { Inject, Injectable } from "@nestjs/common";
 import type { User } from "@spatial/contracts";
-import { type Database, profiles, users } from "@spatial/db";
+import { type Database, enqueueOutbox, OUTBOX_TOPICS, profiles, users } from "@spatial/db";
 import { eq, sql } from "drizzle-orm";
 import { DB } from "../database/database.module";
 
@@ -50,6 +50,25 @@ const userColumns = {
 @Injectable()
 export class UsersRepository {
   constructor(@Inject(DB) private readonly db: Database) {}
+
+  /**
+   * Erases an account: the users row's cascades remove the profile, sessions,
+   * email tokens, consents, quotas, spaces and everything under them in one
+   * transaction, and the user's whole storage folder is queued for deletion.
+   */
+  async deleteAccount(userId: string): Promise<boolean> {
+    return this.db.transaction(async (tx) => {
+      const { rows } = await tx.execute<{ id: string }>(
+        sql`DELETE FROM users WHERE id = ${userId} RETURNING id`,
+      );
+      if (!rows[0]) return false;
+      await enqueueOutbox(tx, {
+        topic: OUTBOX_TOPICS.blobDeletePrefix,
+        payload: { prefix: `${userId}/` },
+      });
+      return true;
+    });
+  }
 
   async findByEmail(email: string): Promise<UserRecord | null> {
     const [row] = await this.db

@@ -12,6 +12,7 @@ import { appendRemoval, removedFrame } from "@spatial/domain/frame-removals";
 import type { BlobStore } from "@spatial/storage";
 import { sql } from "drizzle-orm";
 import { ApiError } from "../common/api-error";
+import { ReadRouter } from "../database/database.module";
 import { SCANS_BLOB_STORE } from "../storage/storage.module";
 import { ScansRepository } from "./scans.repository";
 
@@ -50,14 +51,20 @@ export class ScansService {
   constructor(
     private readonly scans: ScansRepository,
     @Inject(SCANS_BLOB_STORE) private readonly blobs: BlobStore,
+    private readonly reads: ReadRouter,
   ) {}
 
   async list(userId: string, query: ScanListQuery): Promise<ScanListResponse> {
     const after = query.cursor ? decodeCursor(query.cursor, query.sort) : null;
-    const [rows, totals] = await Promise.all([
-      this.scans.list(userId, query, after ? { value: after.v, id: after.id } : null),
-      this.scans.totals(userId),
-    ]);
+    const db = await this.reads.forUser(userId);
+    // One after the other: a request holds at most one pooled connection.
+    const rows = await this.scans.list(
+      userId,
+      query,
+      after ? { value: after.v, id: after.id } : null,
+      db,
+    );
+    const totals = await this.scans.totals(userId, db);
     const page = rows.slice(0, query.limit);
     const last = page[page.length - 1];
     const items = await Promise.all(
@@ -93,8 +100,13 @@ export class ScansService {
   }
 
   async detail(userId: string, scanId: string): Promise<ScanDetailResponse> {
-    const scan = await this.scans.scanJson(userId, scanId);
-    const { objects, portals, surfaces, photos } = await this.scans.children(scanId);
+    // The replica, unless this user just wrote something (read-your-writes).
+    const db = await this.reads.forUser(userId);
+    const { scan, objects, portals, surfaces, photos } = await this.scans.detail(
+      userId,
+      scanId,
+      db,
+    );
     const signed = await Promise.all(
       photos.map(async (photo) => ({
         ...photo,

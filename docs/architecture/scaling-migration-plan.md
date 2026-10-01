@@ -2,12 +2,12 @@
 
 **Target:** TanStack (frontend) · NestJS on Fastify (backend) · PostgreSQL · Azure Blob Storage (Azurite locally) · Redis
 
-|              |                                                                                                                                    |
-| ------------ | ---------------------------------------------------------------------------------------------------------------------------------- |
-| Status       | Draft v3 (decisions D1–D14 in §20). Phases 0–3 built; see the repository README                                                    |
-| Date         | 2026-09-30                                                                                                                         |
-| Scope        | Re-platform Spatial Capture from TanStack Start + Supabase to a separated frontend and backend that can serve ~1M registered users |
-| Out of scope | Changing the capture UX, the reconstruction algorithm, or the prompts (they move as-is)                                            |
+|              |                                                                                                                                        |
+| ------------ | -------------------------------------------------------------------------------------------------------------------------------------- |
+| Status       | Draft v3 (decisions D1–D15 in §20). Phases 0–5 built (phase 5 not yet deployed); the web app is in its own repo (D15). See the READMEs |
+| Date         | 2026-09-30                                                                                                                             |
+| Scope        | Re-platform Spatial Capture from TanStack Start + Supabase to a separated frontend and backend that can serve ~1M registered users     |
+| Out of scope | Changing the capture UX, the reconstruction algorithm, or the prompts (they move as-is)                                                |
 
 ---
 
@@ -17,7 +17,7 @@ Today the app is a TanStack Start (React 19) app with server rendering, built by
 
 The plan:
 
-1. **Split into three deployables from one monorepo:** a static TanStack Router SPA (`apps/web`), a stateless NestJS/Fastify API (`apps/api`), and a NestJS worker (`apps/worker`) that runs long jobs off a Redis/BullMQ queue.
+1. **Split into three deployables:** a static TanStack Router SPA (its own repo, [SQNR-web](https://github.com/nishants1-damco/SQNR-web); decision D15), and, in this monorepo, a stateless NestJS/Fastify API (`apps/api`) and a NestJS worker (`apps/worker`) that runs long jobs off a Redis/BullMQ queue.
 2. **Move the analysis pipeline out of the request path.** The API validates, claims and enqueues; workers run the pipeline; the browser follows progress over Server-Sent Events (SSE) with a polling fallback.
 3. **Move files to Azure Blob Storage** with direct browser-to-blob uploads and downloads through short-lived SAS URLs. The API never proxies image bytes.
 4. **Replace Supabase Auth and RLS** with an in-house NestJS auth module (JWT access + rotating refresh tokens) and mandatory ownership checks in the data-access layer, optionally backed by Postgres RLS as defence in depth.
@@ -161,7 +161,7 @@ All use the `requireSupabaseAuth` middleware, which validates the bearer JWT wit
                 static assets│              │/api/*
                              ▼              ▼
                 ┌────────────────┐   ┌──────────────────────────┐
-                │ apps/web       │   │ apps/api (NestJS/Fastify)│  N replicas, stateless
+                │ web (SQNR-web) │   │ apps/api (NestJS/Fastify)│  N replicas, stateless
                 │ TanStack SPA   │   │ auth, scans, uploads,    │
                 │ (static files) │   │ exports, SSE, enqueue    │
                 └───────┬────────┘   └──┬──────────┬─────────┬──┘
@@ -207,12 +207,11 @@ All use the `requireSupabaseAuth` middleware, which validates the bearer JWT wit
 
 ## 6. Repository layout
 
-A single monorepo with pnpm workspaces and Turborepo for task caching.
+The backend is a monorepo with pnpm workspaces and Turborepo for task caching. The web app was planned as `apps/web` here and is built as a separate repo instead, [SQNR-web](https://github.com/nishants1-damco/SQNR-web) (decision D15); it vendors `packages/contracts` and `packages/domain` from this repo with a sync-and-check script, so this repo stays their source of truth.
 
 ```
-spatial-capture/
+spatial-capture/           (SQNR-new)
 ├─ apps/
-│  ├─ web/                 TanStack Router + Query SPA (Vite)
 │  ├─ api/                 NestJS + Fastify HTTP API
 │  └─ worker/              NestJS application context: BullMQ processors + cron
 ├─ packages/
@@ -236,8 +235,8 @@ Why `apps/worker` is separate from `apps/api` even though both are NestJS: they 
 
 | Current                                                                                                                                                                                                                                                                                                                                                                                         | Target                                                                  | Notes                                                                              |
 | ----------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- | ----------------------------------------------------------------------- | ---------------------------------------------------------------------------------- |
-| `src/routes/*`, `src/components/*`, `src/hooks/*`                                                                                                                                                                                                                                                                                                                                               | `apps/web/src`                                                          | Data access rewritten to the API client                                            |
-| Browser-only libs: `acoustics`, `slam`, `capture-draft`, `capture-id`, `frame-quality`, `floor-plan-export`, `pwa-install`, `theme`, `camera-lens`, `capture-perf`                                                                                                                                                                                                                              | `apps/web/src/lib`                                                      | Unchanged                                                                          |
+| `src/routes/*`, `src/components/*`, `src/hooks/*`                                                                                                                                                                                                                                                                                                                                               | SQNR-web `src/`                                                         | Data access rewritten to the API client                                            |
+| Browser-only libs: `acoustics`, `slam`, `capture-draft`, `capture-id`, `frame-quality`, `floor-plan-export`, `pwa-install`, `theme`, `camera-lens`, `capture-perf`                                                                                                                                                                                                                              | SQNR-web `src/lib`                                                      | Unchanged                                                                          |
 | Pure libs: `analysis-deadline`, `walk-legs`, `wall-ranges`, `graph-solve`, `room-geometry`, `sensor-trust`, `station-health`, `quality-signals`, `reference-sizes`, `sanitize`, `upload-validation`, `frame-selection`, `frame-removals`, `object-reconcile`, `object-scope`, `object-verification`, `inventory-merge`, `shell-check`, `landmarks`, `imdf`, `usd`, `image-crop`, `depth-import` | `packages/domain`                                                       | Must stay I/O-free; add a lint rule that forbids `node:*`, DOM and network imports |
 | `scan-analysis.server`, `scan-spatial.server`, `object-verification.server`, `src/llm/*`, `src/prompts/*`                                                                                                                                                                                                                                                                                       | `packages/pipeline`                                                     | Replace every Supabase call with injected repository/BlobStore interfaces          |
 | Orchestration inside `analyzeScan`                                                                                                                                                                                                                                                                                                                                                              | `apps/worker` `AnalysisProcessor` + `packages/pipeline` `runAnalysis()` | Split into checkpointed stages (§9.4)                                              |
@@ -697,19 +696,19 @@ Keep **TanStack Router** (file-based routes, already used) and **TanStack Query*
 
 ### 13.2 Changes
 
-| Area          | Change                                                                                                                                                                                                                                  |
-| ------------- | --------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
-| Data access   | Delete `@supabase/supabase-js`. Add `apps/web/src/api/` with a typed client generated from the API's OpenAPI spec (`openapi-typescript` + `openapi-fetch`), wrapped in TanStack Query hooks (`useScans`, `useScan`, `useCreateScan`, …) |
-| Auth          | `AuthProvider` holds the access token in memory, refreshes silently before expiry and on 401 (single-flight), and exposes `useAuth()` with the same shape the routes use today (`user`, `loading`)                                      |
-| Uploads       | `UploadManager`: request SAS batch → parallel `PUT` (4 at a time) with retry → `complete`. Resumable across reloads using the existing IndexedDB capture draft (`capture-draft.ts`)                                                     |
-| Analysis      | Replace `runAnalysisResilient` with `useAnalysisRun(scanId)`: `POST` → SSE → polling fallback; same deadline logic from `analysis-deadline.ts`                                                                                          |
-| Catalog       | Infinite query with cursor pagination; thumbnails from batch read SAS                                                                                                                                                                   |
-| Space page    | One `useScan(id)` query instead of 5 parallel reads                                                                                                                                                                                     |
-| Feature flags | `GET /v1/flags` once per session, cached by Query                                                                                                                                                                                       |
-| CSP           | `connect-src` drops `*.supabase.co`; adds the API origin and the Blob endpoint                                                                                                                                                          |
-| Config        | `VITE_API_BASE_URL`, `VITE_BLOB_ORIGIN` only; no secrets in the browser                                                                                                                                                                 |
-| Hosting       | Static build to Azure Static Web Apps or a Blob static website behind Front Door; hashed assets with long cache, `index.html` no-cache; SPA fallback routing                                                                            |
-| PWA           | `manifest.json` and `sw.js` unchanged; make sure the service worker never caches `/v1/*` or SAS URLs                                                                                                                                    |
+| Area          | Change                                                                                                                                                                                                                                                    |
+| ------------- | --------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
+| Data access   | Delete `@supabase/supabase-js`. Add `src/api/` with a typed client, wrapped in TanStack Query hooks (`useScans`, `useScan`, `useCreateScan`, …). As built: typed with the shared `@spatial/contracts` schemas rather than generated from the OpenAPI spec |
+| Auth          | `AuthProvider` holds the access token in memory, refreshes silently before expiry and on 401 (single-flight), and exposes `useAuth()` with the same shape the routes use today (`user`, `loading`)                                                        |
+| Uploads       | `UploadManager`: request SAS batch → parallel `PUT` (4 at a time) with retry → `complete`. Resumable across reloads using the existing IndexedDB capture draft (`capture-draft.ts`)                                                                       |
+| Analysis      | Replace `runAnalysisResilient` with `useAnalysisRun(scanId)`: `POST` → SSE → polling fallback; same deadline logic from `analysis-deadline.ts`                                                                                                            |
+| Catalog       | Infinite query with cursor pagination; thumbnails from batch read SAS                                                                                                                                                                                     |
+| Space page    | One `useScan(id)` query instead of 5 parallel reads                                                                                                                                                                                                       |
+| Feature flags | `GET /v1/flags` once per session, cached by Query                                                                                                                                                                                                         |
+| CSP           | `connect-src` drops `*.supabase.co`; adds the API origin and the Blob endpoint                                                                                                                                                                            |
+| Config        | `VITE_API_BASE_URL`, `VITE_BLOB_ORIGIN` only; no secrets in the browser                                                                                                                                                                                   |
+| Hosting       | Static build to Azure Static Web Apps or a Blob static website behind Front Door; hashed assets with long cache, `index.html` no-cache; SPA fallback routing                                                                                              |
+| PWA           | `manifest.json` and `sw.js` unchanged; make sure the service worker never caches `/v1/*` or SAS URLs                                                                                                                                                      |
 
 Migrate route by route (§17, phase 4). A route is done when it has no `supabase` import.
 
@@ -901,6 +900,16 @@ Each phase ends with a working, deployable system. Sizes are relative (S < M < L
 
 **Exit:** no `supabase` import remains in `apps/web`; full capture → analysis → view → export works end to end locally.
 
+**As built** (details in SQNR-web's README and `docs/porting-ledger.md`):
+
+- **A separate repo, [SQNR-web](https://github.com/nishants1-damco/SQNR-web)** (decision D15), instead of `apps/web`. It vendors `@spatial/contracts` and `@spatial/domain` from this repo as source; `pnpm shared:sync` copies them and records the platform commit, and `pnpm shared:check` (in its CI) fails if a vendored file is edited there. Change them here, then sync.
+- **Sessions.** Access token in memory; refreshes are single-flight within a tab and serialised across tabs with a Web Lock, because the API ends the session on a replayed refresh token. Sign-out propagates to other tabs. A page's first request waits for the session restore.
+- **Analysis.** `POST` queues the run and the page follows it over SSE (read with `fetch`, since `EventSource` can't send the bearer token), falling back to polling. Leaving the page no longer interrupts a run, so the leave guard on the space page is gone.
+- **Uploads** go straight to Blob Storage, four at a time with retries; reshoots use `replaceStations`. Uploads don't resume across a reload: the capture draft never stored the frames themselves.
+- **CSP** is generated at build time from `VITE_API_BASE_URL` and `VITE_BLOB_ORIGIN` (both `connect-src` and `img-src` need the Blob origin) and sent as a meta tag and in the generated `staticwebapp.config.json`.
+- **Google sign-in** is removed until D13 is decided. New pages for email verification and password reset.
+- **Exit met locally:** a browser smoke test (Playwright with the installed Chrome) runs sign-up → upload to Blob Storage → analysis → catalog → space page (plan, frames, export) → re-run → privacy sweep → reload keeps the session → deletes → sign-out, against the dev server and the production build. The analysis ran through the real worker with a scripted model instead of Claude. The capture wizard itself (camera, compass, motion) still needs a phone.
+
 ### Phase 5 — Hardening and scale (L)
 
 - Redis-backed `QuotaModule` and throttling; optional RLS defence in depth.
@@ -911,6 +920,35 @@ Each phase ends with a working, deployable system. Sizes are relative (S < M < L
 - Security review.
 
 **Exit:** staging sustains the target load profile with SLOs met; security review findings closed.
+
+**As built** (details in the README, `infra/azure/README.md` and `docs/security-review.md`):
+
+- **Limits.**
+  - Quotas moved to Redis: a GCRA in Lua, failing closed. The Postgres `consume_rate_limit` stays behind `QUOTA_BACKEND=postgres`.
+  - A global request throttle runs after auth: 300 a minute per user, or 60 per IP when anonymous, failing open.
+  - Before a run is queued, the API checks queue depth (503 past `ANALYSIS_MAX_QUEUED`), global daily AI spend (503) and per-user daily spend (429). Spend is projected as the last 24 hours' cost plus the runs in flight, at the per-run estimate.
+- **Reads.** Catalog, detail and export reads use the replica, unless the user wrote in the last 10 s (a Redis marker set after each successful write). Catalog category slices are cached for 10 minutes.
+- **Observability.**
+  - `@spatial/observability` sets up OpenTelemetry (HTTP, Fastify, pg, ioredis, undici, pino).
+  - The trace context rides in outbox payloads into BullMQ jobs, so one trace covers the request, the worker job and each pipeline stage.
+  - Custom metrics: runs, stage durations, queue wait, LLM calls, tokens, cost, 429s, quota rejections, SSE streams, queue depth.
+  - Locally the apps export to Grafana LGTM with a provisioned dashboard. In Azure, traces go through the Container Apps OpenTelemetry agent and metrics through the Azure Monitor exporter.
+  - Alerts cover the SLOs in §16.1–16.2.
+- **Infrastructure (D10 taken as Bicep).** Container Apps for the API, the worker (KEDA on the analysis queue) and a migration job; Postgres Flexible Server with PgBouncer, plus HA and a read replica in production; two Redis instances; ZRS Blob Storage with lifecycle tiering and user-delegation SAS; Key Vault with managed identities; Front Door with a WAF; Static Web Apps for SQNR-web. GitHub Actions deploys with OIDC: build → migrate → deploy → smoke test, staging then production.
+- **Load tests (§18.1)** are k6 scripts in `tests/load`, with a model stub (`LLM_STUB`, refused in production). Only a small local read-mix run has been done. It found and fixed four problems:
+  - Detail used four pooled connections per request; it now runs one query.
+  - Pool exhaustion returned 500s; it now returns a retryable 503.
+  - A span per Fastify hook halved API throughput; hook spans are off, and the API samples 10% of traces in production.
+  - A frame URL was signed through a new SDK client each time.
+  - The staging run is still to do.
+- **Security review** (`docs/security-review.md`):
+  - Fixed client-IP spoofing: `TRUST_PROXY` is now a hop count.
+  - The API is locked to Front Door (`X-Azure-FDID`).
+  - Fastify upgraded to 5.12.5 and js-yaml patched.
+  - Account deletion (`DELETE /v1/me`) revokes live tokens.
+  - Catalog downloads have a timeout.
+  - Open items, such as optional RLS and CI scanning, are listed there.
+- **Exit not yet met:** nothing has been deployed to a subscription, so the staging load profile and SLOs are unverified.
 
 ### Phase 6 — Data migration and cutover (M)
 
@@ -988,6 +1026,7 @@ Each phase ends with a working, deployable system. Sizes are relative (S < M < L
 | D11 | Claude access path: Claude API (first-party) vs Claude on Microsoft Foundry | **Decided 2026-09-30** | Anthropic's own API, with server-side refusal fallbacks (§9.7.2) and custom Opus 5.5 rate limits (§9.7.6)                                                                                                                                |
 | D12 | Local models in production: dev-only vs a GPU worker pool                   | **Decided 2026-09-30** | Development and CI only; the provider interface and `analysis-local` queue stay so a GPU pool can be added later without code changes                                                                                                    |
 | D13 | Google sign-in, which the current app offers through Lovable's OAuth helper | Open                   | The in-house auth module is email and password only. Options: add Google OpenID Connect to the auth module before cutover (accounts matched by verified email), or accept that Google-only users set a password through reset at cutover |
+| D15 | Where the web app lives: `apps/web` in this monorepo vs its own repo        | **Decided 2026-10-01** | Its own repo, SQNR-web, deployed on its own. It vendors `@spatial/contracts` and `@spatial/domain` from this repo with a sync-and-check script; this repo stays their source of truth                                                    |
 | D14 | NestJS major version                                                        | **Decided (phase 1)**  | NestJS 11.2.x. NestJS 12 (released September 2026) is ESM-only and parts of the ecosystem (e.g. `nestjs-zod`) don't support it yet; revisit when they do                                                                                 |
 
 ---

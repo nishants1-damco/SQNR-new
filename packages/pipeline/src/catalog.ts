@@ -110,9 +110,15 @@ function toMatch(row: Row): CatalogMatch {
   };
 }
 
+/** How long a category's catalog rows are reused before being read again. */
+const SLICE_TTL_MS = 10 * 60 * 1000;
+
 export class CatalogSource {
-  /** Category slices are small (<100 rows) and fixed for a run. */
-  private readonly slices = new Map<string, Promise<ProductDimension[]>>();
+  /**
+   * Category slices are small (<100 rows) and change rarely; the worker keeps
+   * one CatalogSource for the process, so they expire rather than live forever.
+   */
+  private readonly slices = new Map<string, { rows: Promise<ProductDimension[]>; at: number }>();
 
   constructor(private readonly options: CatalogSourceOptions) {}
 
@@ -127,16 +133,19 @@ export class CatalogSource {
   async matchProduct(category: string, label: string): Promise<ProductDimension | null> {
     try {
       let slice = this.slices.get(category);
-      if (!slice) {
-        slice = this.db
-          .execute<Row>(
-            sql`SELECT id, category, label, brand, model, width_m, height_m, depth_m, diagonal_in, aspect_ratio
+      if (!slice || Date.now() - slice.at > SLICE_TTL_MS) {
+        slice = {
+          rows: this.db
+            .execute<Row>(
+              sql`SELECT id, category, label, brand, model, width_m, height_m, depth_m, diagonal_in, aspect_ratio
                 FROM product_dimensions WHERE category = ${category} ORDER BY label`,
-          )
-          .then((r) => r.rows.map(toDimension));
+            )
+            .then((r) => r.rows.map(toDimension)),
+          at: Date.now(),
+        };
         this.slices.set(category, slice);
       }
-      return pickProductMatch(await slice, category, label);
+      return pickProductMatch(await slice.rows, category, label);
     } catch (err) {
       this.slices.delete(category);
       this.options.logger.warn({ category, err: errString(err) }, "matchProduct failed");
@@ -216,10 +225,15 @@ export class CatalogSource {
       if (parsed.protocol !== "https:" || !this.options.imageOrigins.includes(parsed.origin)) {
         return null;
       }
-      const res = await (this.options.fetch ?? fetch)(url, { redirect: "error" });
+      // A slow or huge reply must not hold a worker's analysis slot.
+      const res = await (this.options.fetch ?? fetch)(url, {
+        redirect: "error",
+        signal: AbortSignal.timeout(15_000),
+      });
       if (!res.ok) return null;
       const contentType = res.headers.get("content-type") ?? "image/jpeg";
       if (!contentType.startsWith("image/")) return null;
+      if (Number(res.headers.get("content-length") ?? 0) > 4_000_000) return null;
       const bytes = new Uint8Array(await res.arrayBuffer());
       if (bytes.length === 0 || bytes.length > 4_000_000) return null;
       return { contentType, base64: Buffer.from(bytes).toString("base64") };

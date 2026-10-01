@@ -3,6 +3,7 @@
 import { Inject, Injectable, type OnApplicationShutdown } from "@nestjs/common";
 import type { WorkerConfig } from "@spatial/config";
 import { OUTBOX_TOPICS, type OutboxTopic } from "@spatial/db";
+import { observeGauge } from "@spatial/observability";
 import { type JobsOptions, Queue } from "bullmq";
 import { Redis } from "ioredis";
 import { WORKER_CONFIG } from "./tokens";
@@ -64,6 +65,18 @@ export class Queues implements OnApplicationShutdown {
 
   constructor(@Inject(WORKER_CONFIG) private readonly config: WorkerConfig) {
     this.connection = redisConnection(config.queue.redisUrl);
+    // Queue depth by state, read on each metrics export (plan §16.1: alert on
+    // queue wait; the KEDA scaler reads the same lists in Azure).
+    observeGauge("spatial.queue.jobs", "Jobs per queue and state", async () => {
+      const out: { value: number; attributes: Record<string, string> }[] = [];
+      for (const name of Object.values(QUEUE)) {
+        const counts = await this.get(name).getJobCounts("waiting", "active", "delayed", "failed");
+        for (const [state, value] of Object.entries(counts)) {
+          out.push({ value, attributes: { queue: name, state } });
+        }
+      }
+      return out;
+    });
   }
 
   get(name: QueueName): Queue {

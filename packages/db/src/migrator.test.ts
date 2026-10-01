@@ -36,6 +36,7 @@ describe("readMigrations", () => {
       "0003_reference_data",
       "0004_uploads_and_outbox",
       "0005_analysis_runs",
+      "0006_spend_index",
     ]);
   });
 });

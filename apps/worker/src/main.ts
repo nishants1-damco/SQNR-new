@@ -1,11 +1,9 @@
-import { existsSync } from "node:fs";
+import { telemetry } from "./telemetry";
 import { loadWorkerConfig } from "@spatial/config";
 import { createWorker } from "./app";
 import { startHealthServer } from "./health";
 
 async function main() {
-  // Local convenience only; deployed environments set real environment variables.
-  if (existsSync(".env")) process.loadEnvFile(".env");
   const config = loadWorkerConfig();
   const app = await createWorker(config);
 
@@ -27,6 +25,8 @@ async function main() {
       void app
         .close()
         .then(() => health?.close())
+        // Flush the last spans and metrics.
+        .then(() => telemetry.shutdown())
         .finally(() => process.exit(0));
     });
   }

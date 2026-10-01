@@ -65,6 +65,8 @@ export class AzureBlobStore implements BlobStore {
   private readonly service: BlobServiceClient;
   private readonly signer: Signer;
   private delegationKey: { key: UserDelegationKey; expiresOn: Date } | null = null;
+  /** The container's URL as browsers reach it (publicEndpoint applied). */
+  private readonly containerUrl: string;
 
   constructor(private readonly options: AzureBlobStoreOptions) {
     if (options.connectionString) {
@@ -80,6 +82,7 @@ export class AzureBlobStore implements BlobStore {
       throw new Error("AzureBlobStore needs a connection string, or an account URL and credential");
     }
     this.container = this.service.getContainerClient(options.container);
+    this.containerUrl = this.publicUrl(this.container.url);
   }
 
   async presignPut(
@@ -183,12 +186,14 @@ export class AzureBlobStore implements BlobStore {
     },
   ): Promise<string> {
     assertSafeKey(key);
-    const blob = this.container.getBlobClient(key);
+    // Built by hand: a BlobClient per URL was 13% of API CPU on detail pages
+    // with many frames (plan §18.1 load tests).
+    const url = `${this.containerUrl}/${key.split("/").map(encodeURIComponent).join("/")}`;
     const values = {
       containerName: this.container.containerName,
       blobName: key,
       startsOn: new Date(Date.now() - CLOCK_SKEW_MS),
-      protocol: blob.url.startsWith("https:") ? SASProtocol.Https : SASProtocol.HttpsAndHttp,
+      protocol: url.startsWith("https:") ? SASProtocol.Https : SASProtocol.HttpsAndHttp,
       ...options,
     };
     const sas =
@@ -199,7 +204,7 @@ export class AzureBlobStore implements BlobStore {
             await this.userDelegationKey(options.expiresOn),
             this.signer.accountName,
           );
-    return this.publicUrl(`${blob.url}?${sas.toString()}`);
+    return `${url}?${sas.toString()}`;
   }
 
   private async userDelegationKey(mustCover: Date): Promise<UserDelegationKey> {
@@ -224,6 +229,6 @@ export class AzureBlobStore implements BlobStore {
     const external = new URL(this.options.publicEndpoint);
     internal.protocol = external.protocol;
     internal.host = external.host;
-    return internal.toString();
+    return internal.toString().replace(/\/$/, "");
   }
 }

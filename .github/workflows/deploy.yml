@@ -1,0 +1,45 @@
+name: Deploy
+
+# Plan §15: images → ACR, database migrations as their own step, then the
+# Bicep deployment (which rolls the API and worker to the new images), then a
+# smoke test. Staging deploys on every green CI run on main; production waits
+# for approval (configure required reviewers on the `production` environment).
+#
+# Needs, per GitHub environment (staging, production):
+#   variables: AZURE_CLIENT_ID, AZURE_TENANT_ID, AZURE_SUBSCRIPTION_ID,
+#              AZURE_RESOURCE_GROUP, ALERT_EMAIL
+#   secrets:   POSTGRES_ADMIN_PASSWORD, APP_RW_PASSWORD, APP_MIGRATOR_PASSWORD
+# The Azure login uses OpenID Connect (a federated credential on the app
+# registration), so no Azure secret is stored in GitHub.
+
+on:
+  workflow_run:
+    workflows: [CI]
+    types: [completed]
+    branches: [main]
+  workflow_dispatch:
+
+permissions:
+  id-token: write
+  contents: read
+
+concurrency:
+  group: deploy
+  cancel-in-progress: false
+
+jobs:
+  staging:
+    if: github.event_name == 'workflow_dispatch' || github.event.workflow_run.conclusion == 'success'
+    uses: ./.github/workflows/deploy-environment.yml
+    with:
+      environment: staging
+      params: infra/azure/staging.bicepparam
+    secrets: inherit
+
+  production:
+    needs: staging
+    uses: ./.github/workflows/deploy-environment.yml
+    with:
+      environment: production
+      params: infra/azure/production.bicepparam
+    secrets: inherit

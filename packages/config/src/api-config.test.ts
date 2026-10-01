@@ -74,6 +74,20 @@ describe("loadApiConfig", () => {
   });
 });
 
+describe("TRUST_PROXY", () => {
+  it("takes a hop count, and refuses trusting every hop in production", () => {
+    expect(loadApiConfig({ ...ports }).trustProxy).toBe(false);
+    expect(loadApiConfig({ ...ports, TRUST_PROXY: "2" }).trustProxy).toBe(2);
+    expect(loadApiConfig({ ...ports, TRUST_PROXY: "true" }).trustProxy).toBe(true);
+    expect(() => loadApiConfig({ NODE_ENV: "production", TRUST_PROXY: "true" })).toThrow(
+      /TRUST_PROXY: use a hop count/,
+    );
+    expect(() => loadApiConfig({ NODE_ENV: "production", TRUST_PROXY: "2" })).toThrow(
+      /FRONT_DOOR_ID: required with a TRUST_PROXY hop count/,
+    );
+  });
+});
+
 describe("loadMigratorDatabaseUrl", () => {
   it("uses the schema owner directly against Postgres, not PgBouncer", () => {
     expect(loadMigratorDatabaseUrl({ ...ports })).toBe(
@@ -108,6 +122,20 @@ describe("loadWorkerConfig", () => {
     );
     expect(() => loadApiConfig({ NODE_ENV: "production", LLM_DEFAULT_PROVIDER: "ollama" })).toThrow(
       /must be claude in production/,
+    );
+  });
+
+  it("allows the load-test model stub everywhere but production", async () => {
+    const { loadWorkerConfig } = await import("./worker-config");
+    expect(loadWorkerConfig({ ...ports }).llmStub).toBeNull();
+    expect(
+      loadWorkerConfig({ ...ports, LLM_STUB: "true", LLM_STUB_LATENCY_MS: "500" }).llmStub,
+    ).toEqual({ latencyMs: 500, rateLimitRate: 0.02 });
+    expect(() =>
+      loadWorkerConfig({ ...ports, LLM_STUB: "true", DEPLOY_ENV: "production" }),
+    ).toThrow(/refused in production/);
+    expect(() => loadWorkerConfig({ NODE_ENV: "production", LLM_STUB: "true" })).toThrow(
+      /refused in production/,
     );
   });
 });

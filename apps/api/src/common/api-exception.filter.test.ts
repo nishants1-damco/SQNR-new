@@ -6,7 +6,7 @@ import { ApiError } from "./api-error";
 import { ApiExceptionFilter } from "./api-exception.filter";
 
 function run(exception: unknown) {
-  const logger = { error: vi.fn() };
+  const logger = { error: vi.fn(), warn: vi.fn() };
   const reply = {
     statusCode: 0,
     body: undefined as unknown,
@@ -59,6 +59,17 @@ describe("ApiExceptionFilter", () => {
       expect(logger.error).toHaveBeenCalledOnce();
       expect(logger.error.mock.calls[0]?.[0]).toMatchObject({ reqId: "req-1" });
     }
+  });
+
+  it("sheds load with a retryable 503 when the database pool is exhausted", () => {
+    const exhausted = new Error("Failed query: SELECT 1", {
+      cause: new Error("timeout exceeded when trying to connect"),
+    });
+    const { reply, logger } = run(exhausted);
+    expect(reply.statusCode).toBe(503);
+    expect(reply.body).toMatchObject({ code: "service_unavailable" });
+    expect(reply.headers["retry-after"]).toBe("1");
+    expect(logger.error).not.toHaveBeenCalled();
   });
 
   it("passes Fastify client errors (bad JSON, body too large) through as invalid_request", () => {

@@ -6,6 +6,7 @@
 //      and type, then records the frames in one transaction and queues the
 //      media check (magic bytes, EXIF strip, thumbnail) for each.
 // Image bytes never pass through the API.
+import { appMetrics } from "@spatial/observability";
 import { randomUUID } from "node:crypto";
 import { Inject, Injectable } from "@nestjs/common";
 import {
@@ -260,6 +261,7 @@ export class UploadsService {
       );
     }
     if (problems.length) {
+      appMetrics().uploadFailures.add(problems.length);
       throw new ApiError(
         400,
         "invalid_request",

@@ -27,6 +27,7 @@
     "infra:logs": "docker compose -f infra/docker/docker-compose.yml logs",
     "infra:llm": "docker compose -f infra/docker/docker-compose.yml --profile local-llm up -d --wait ollama",
     "infra:llm:models": "docker compose -f infra/docker/docker-compose.yml --profile local-llm exec ollama sh /modelfiles/create-models.sh",
+    "infra:otel": "docker compose -f infra/docker/docker-compose.yml --profile observability up -d lgtm",
     "dev:api": "turbo run dev --filter=@spatial/api",
     "dev:worker": "turbo run dev --filter=@spatial/worker"
   },

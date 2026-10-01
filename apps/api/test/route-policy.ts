@@ -24,6 +24,7 @@ export const PUBLIC_ROUTES = [
  */
 export const SELF_SCOPED_ROUTES = [
   "GET /v1/me",
+  "DELETE /v1/me",
   "POST /v1/auth/verify-email/resend",
   "GET /v1/scans",
   "POST /v1/scans",

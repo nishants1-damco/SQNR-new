@@ -7,3 +7,11 @@ allowBuilds:
   "@swc/core": true
   esbuild: true
   msgpackr-extract: false
+  protobufjs: false
+# Security fixes ahead of upstream pins (docs/security-review.md):
+# @nestjs/platform-fastify pins fastify 5.11.3 (GHSA-3m5p-2c4r-xxw2: X-Forwarded-*
+# spoofing with a trustProxy hop count; GHSA-w2qp-rph6-63g4), and
+# @nestjs/swagger brings js-yaml 5.x (GHSA-r3ph-w7gj-g6xm).
+overrides:
+  fastify: 5.12.5
+  "js-yaml@>=5.0.0 <5.4.1": ^5.4.2

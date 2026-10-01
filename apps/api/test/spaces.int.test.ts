@@ -19,6 +19,8 @@ import {
   uploadFrames,
   type User,
 } from "./helpers/spaces";
+import { RateLimiter } from "../src/common/rate-limiter";
+import { QUOTAS } from "../src/quota/quota.service";
 import { startTestApp, type TestApp } from "./helpers/test-app";
 
 let t: TestApp;
@@ -298,11 +300,10 @@ describe("quotas", () => {
     const user = await signUp(t);
     const scan = await createScan(user);
     // As if the user had already opened this hour's allowance of sessions.
-    await admin.query(
-      `INSERT INTO user_rate_limits (user_id, bucket, window_started_at, count)
-       VALUES ($1, 'upload_session', now(), 120)`,
-      [user.id],
-    );
+    const limiter = t.app.get(RateLimiter);
+    for (let i = 0; i < QUOTAS.uploadSession.max; i++) {
+      await limiter.hit(`quota:upload_session:${user.id}`, QUOTAS.uploadSession);
+    }
     const res = await issueUpload(user, scan.id, [
       { kind: "frame", contentType: "image/jpeg", sizeBytes: 12 },
     ]);

@@ -1,0 +1,99 @@
+name: Deploy one environment
+
+on:
+  workflow_call:
+    inputs:
+      environment:
+        type: string
+        required: true
+      params:
+        type: string
+        required: true
+
+jobs:
+  deploy:
+    name: Deploy to ${{ inputs.environment }}
+    runs-on: ubuntu-latest
+    environment: ${{ inputs.environment }}
+    env:
+      IMAGE_TAG: ${{ github.event.workflow_run.head_sha || github.sha }}
+      RG: ${{ vars.AZURE_RESOURCE_GROUP }}
+      ALERT_EMAIL: ${{ vars.ALERT_EMAIL }}
+      POSTGRES_ADMIN_PASSWORD: ${{ secrets.POSTGRES_ADMIN_PASSWORD }}
+      APP_RW_PASSWORD: ${{ secrets.APP_RW_PASSWORD }}
+      APP_MIGRATOR_PASSWORD: ${{ secrets.APP_MIGRATOR_PASSWORD }}
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          ref: ${{ env.IMAGE_TAG }}
+
+      - uses: azure/login@v2
+        with:
+          client-id: ${{ vars.AZURE_CLIENT_ID }}
+          tenant-id: ${{ vars.AZURE_TENANT_ID }}
+          subscription-id: ${{ vars.AZURE_SUBSCRIPTION_ID }}
+
+      - name: Find the registry
+        id: names
+        run: |
+          acr=$(az acr list -g "$RG" --query "[0].name" -o tsv)
+          echo "acr=$acr" >> "$GITHUB_OUTPUT"
+          echo "server=$(az acr show -n "$acr" --query loginServer -o tsv)" >> "$GITHUB_OUTPUT"
+
+      - name: Build and push images
+        env:
+          SERVER: ${{ steps.names.outputs.server }}
+        run: |
+          az acr login -n "${{ steps.names.outputs.acr }}"
+          for app in api worker; do
+            docker build -f infra/docker/app.Dockerfile \
+              --build-arg APP=$app --build-arg APP_VERSION="$IMAGE_TAG" \
+              -t "$SERVER/spatial-$app:$IMAGE_TAG" .
+            docker push "$SERVER/spatial-$app:$IMAGE_TAG"
+          done
+
+      # Migrations are backward compatible (expand, then contract), so the
+      # running revision keeps working while they apply.
+      - name: Run database migrations
+        run: |
+          job=$(az containerapp job list -g "$RG" --query "[?ends_with(name, '-migrate')].name | [0]" -o tsv)
+          if [ -z "$job" ]; then
+            echo "No migration job yet (first deployment); main.bicep creates it."
+          else
+            az containerapp job update -g "$RG" -n "$job" \
+              --image "${{ steps.names.outputs.server }}/spatial-api:$IMAGE_TAG"
+            execution=$(az containerapp job start -g "$RG" -n "$job" --query name -o tsv)
+            for i in $(seq 1 90); do
+              status=$(az containerapp job execution show -g "$RG" -n "$job" --job-execution-name "$execution" --query properties.status -o tsv)
+              echo "migration: $status"
+              [ "$status" = "Succeeded" ] && break
+              [ "$status" = "Failed" ] && exit 1
+              sleep 10
+            done
+            [ "$status" = "Succeeded" ]
+          fi
+
+      - name: Deploy infrastructure and apps
+        id: deploy
+        run: |
+          az deployment group create -g "$RG" \
+            --name "spatial-$IMAGE_TAG" \
+            --template-file infra/azure/main.bicep \
+            --parameters "${{ inputs.params }}" \
+            --query properties.outputs -o json > outputs.json
+          echo "edge=$(jq -r .edgeHost.value outputs.json)" >> "$GITHUB_OUTPUT"
+
+      - name: Smoke test
+        env:
+          EDGE: ${{ steps.deploy.outputs.edge }}
+        run: |
+          for i in $(seq 1 30); do
+            # Up and answering: an unauthenticated /v1/me is a 401.
+            [ "$(curl -sS -o /dev/null -w '%{http_code}' "https://$EDGE/v1/me")" = "401" ] && break
+            sleep 10
+          done
+          # Unauthenticated requests must be refused with the error envelope.
+          body=$(curl -sS "https://$EDGE/v1/scans")
+          echo "$body" | jq -e '.code == "unauthorized"'
+          # The JWKS is public.
+          curl -fsS "https://$EDGE/.well-known/jwks.json" | jq -e '.keys | length > 0'

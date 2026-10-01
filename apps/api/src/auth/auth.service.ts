@@ -18,6 +18,7 @@ import { accountKey, AUTH_LIMITS, AuthRateLimiter } from "./auth-rate-limiter";
 import type { AuthUser, ClientInfo } from "./auth.types";
 import { EmailTokensRepository } from "./email-tokens.repository";
 import { PasswordsService } from "./passwords.service";
+import { RevokedUsers } from "./revoked-users";
 import { SessionsRepository } from "./sessions.repository";
 import { TokensService } from "./tokens.service";
 import { EmailTaken, toUserDto, type UserRecord, UsersRepository } from "./users.repository";
@@ -44,6 +45,7 @@ export class AuthService {
     private readonly tokens: TokensService,
     private readonly limiter: AuthRateLimiter,
     private readonly mail: MailService,
+    private readonly revoked: RevokedUsers,
   ) {}
 
   async signUp(input: SignUpRequest, client: ClientInfo): Promise<IssuedSession> {
@@ -124,6 +126,24 @@ export class AuthService {
 
   async signOut(refreshToken: string | undefined): Promise<void> {
     if (refreshToken) await this.sessions.revokeFamilyOf(this.tokens.hashToken(refreshToken));
+  }
+
+  /**
+   * Erases the caller's account and everything in it (plan §10.4). The
+   * password is checked again, at the sign-in rate per account, so a stolen
+   * access token alone can neither delete an account nor guess its password.
+   */
+  async deleteAccount(caller: AuthUser, password: string): Promise<void> {
+    await this.limiter.hit("delete-account:user", caller.id, AUTH_LIMITS.signInPerAccount);
+    const user = await this.users.findById(caller.id);
+    if (!user || user.disabledAt) throw ApiError.unauthorized();
+    const { ok } = await this.passwords.verify(user.passwordHash, password);
+    // 403, not 401: the session is fine, and clients treat 401 as signed out.
+    if (!ok) throw new ApiError(403, "invalid_credentials", "That password isn't right");
+    await this.users.deleteAccount(user.id);
+    // Refresh tokens went with the account; this ends the live access tokens.
+    await this.revoked.revoke(user.id);
+    this.logger.log({ userId: user.id }, "account deleted");
   }
 
   async me(caller: AuthUser): Promise<User> {

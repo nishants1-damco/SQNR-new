@@ -34,6 +34,12 @@ export const SignInRequestSchema = z.object({
 });
 export type SignInRequest = z.infer<typeof SignInRequestSchema>;
 
+/** `DELETE /v1/me`: the current password again, so a stolen session alone can't erase an account. */
+export const DeleteAccountRequestSchema = z.object({
+  password: z.string().min(1).max(PASSWORD_MAX_LENGTH),
+});
+export type DeleteAccountRequest = z.infer<typeof DeleteAccountRequestSchema>;
+
 /** Single-use token from an emailed link. */
 export const EmailTokenSchema = z.string().min(20).max(200);
 

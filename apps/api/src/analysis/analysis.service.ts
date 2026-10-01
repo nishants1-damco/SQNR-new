@@ -29,6 +29,7 @@ import { ApiError } from "../common/api-error";
 import { API_CONFIG } from "../config/config.module";
 import { DB } from "../database/database.module";
 import { QUOTAS, QuotaService } from "../quota/quota.service";
+import { AnalysisLimits } from "./analysis-limits";
 
 interface ScanState {
   [column: string]: unknown;
@@ -51,6 +52,7 @@ export class AnalysisService {
     @Inject(DB) private readonly db: Database,
     @Inject(API_CONFIG) private readonly config: ApiConfig,
     private readonly quota: QuotaService,
+    private readonly limits: AnalysisLimits,
   ) {}
 
   private async scanState(
@@ -103,6 +105,8 @@ export class AnalysisService {
     if (scan.status === "processing" && !isAnalysisStale(scan)) return this.running(scan);
     if (scan.photos === 0) throw ApiError.conflict("Upload frames before analysing this space");
 
+    // Spend caps and backpressure first, so a refused run costs no quota.
+    await this.limits.check(userId);
     // Only runs that will actually happen are charged.
     await this.quota.consume(userId, QUOTAS.analyzeScanHourly);
     await this.quota.consume(userId, QUOTAS.analyzeScanDaily);

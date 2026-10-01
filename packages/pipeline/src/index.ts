@@ -9,6 +9,7 @@ export * from "./llm/local";
 export * from "./llm/provider";
 export * from "./llm/schemas";
 export * from "./llm/scripted";
+export * from "./llm/stub";
 export * from "./llm/types";
 export * from "./llm/usage";
 export * from "./logger";

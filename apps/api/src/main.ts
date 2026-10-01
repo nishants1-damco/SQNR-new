@@ -1,15 +1,17 @@
+import { telemetry } from "./telemetry";
 import "reflect-metadata";
-import { existsSync } from "node:fs";
 import { loadApiConfig } from "@spatial/config";
 import { createApp } from "./app";
 
 async function main() {
-  // Local convenience only; deployed environments set real environment variables.
-  if (existsSync(".env")) process.loadEnvFile(".env");
   const config = loadApiConfig();
   const app = await createApp(config);
   // SIGTERM: readiness turns unhealthy, in-flight requests finish, pools close.
   app.enableShutdownHooks();
+  // Flush the last spans and metrics as the process stops.
+  for (const signal of ["SIGTERM", "SIGINT"] as const) {
+    process.once(signal, () => void telemetry.shutdown());
+  }
   await app.listen({ host: config.host, port: config.port });
 }
 

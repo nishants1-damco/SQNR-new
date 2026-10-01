@@ -1,13 +1,17 @@
-// Per-user quotas on expensive or abusable actions (plan §11), backed by the
-// consume_rate_limit() SQL function ported from the original app: one atomic
-// upsert per call, so concurrent requests can't slip past the cap. Moves to
-// Redis in phase 5.
+// Per-user quotas on expensive or abusable actions (plan §11). Counted in
+// Redis (GCRA, see common/rate-limiter.ts) since phase 5. The original
+// consume_rate_limit() SQL function is kept behind QUOTA_BACKEND=postgres, so
+// the two can be compared and the database can take over if Redis can't.
 //
 // Fails closed: if the limiter can't decide, the request is refused (503).
+import { appMetrics } from "@spatial/observability";
 import { Global, Inject, Injectable, Logger, Module } from "@nestjs/common";
+import type { ApiConfig } from "@spatial/config";
 import type { Database } from "@spatial/db";
 import { sql } from "drizzle-orm";
 import { ApiError } from "../common/api-error";
+import { RateLimiter } from "../common/rate-limiter";
+import { API_CONFIG } from "../config/config.module";
 import { DB } from "../database/database.module";
 
 export interface QuotaPolicy {
@@ -37,26 +41,45 @@ export const QUOTAS = {
 export class QuotaService {
   private readonly logger = new Logger("QuotaService");
 
-  constructor(@Inject(DB) private readonly db: Database) {}
+  constructor(
+    @Inject(DB) private readonly db: Database,
+    @Inject(API_CONFIG) private readonly config: ApiConfig,
+    private readonly limiter: RateLimiter,
+  ) {}
 
   async consume(userId: string, policy: QuotaPolicy): Promise<void> {
-    let row: { allowed: boolean; retry_after_ms: string | number } | undefined;
+    let decision: { allowed: boolean; retryAfterMs: number };
     try {
-      const result = await this.db.execute<{ allowed: boolean; retry_after_ms: string }>(
-        sql`SELECT allowed, retry_after_ms FROM consume_rate_limit(${userId}, ${policy.bucket}, ${policy.windowMs}, ${policy.max})`,
-      );
-      row = result.rows[0];
+      decision =
+        this.config.limits.quotaBackend === "postgres"
+          ? await this.consumeInPostgres(userId, policy)
+          : await this.limiter.hit(`quota:${policy.bucket}:${userId}`, {
+              max: policy.max,
+              windowMs: policy.windowMs,
+            });
     } catch (err) {
       this.logger.error({ err, bucket: policy.bucket }, "quota check failed; refusing request");
       throw ApiError.unavailable();
     }
-    if (!row) throw ApiError.unavailable();
-    if (!row.allowed) {
-      throw ApiError.rateLimited(Math.max(1, Math.ceil(Number(row.retry_after_ms) / 1000)));
+    if (!decision.allowed) {
+      appMetrics().quotaRejections.add(1, { kind: "quota", bucket: policy.bucket });
+      throw ApiError.rateLimited(Math.max(1, Math.ceil(decision.retryAfterMs / 1000)));
     }
+  }
+
+  private async consumeInPostgres(userId: string, policy: QuotaPolicy) {
+    const { rows } = await this.db.execute<{ allowed: boolean; retry_after_ms: string }>(
+      sql`SELECT allowed, retry_after_ms FROM consume_rate_limit(${userId}, ${policy.bucket}, ${policy.windowMs}, ${policy.max})`,
+    );
+    const row = rows[0];
+    if (!row) throw new Error("consume_rate_limit returned nothing");
+    return { allowed: row.allowed, retryAfterMs: Number(row.retry_after_ms) };
   }
 }
 
 @Global()
-@Module({ providers: [QuotaService], exports: [QuotaService] })
+@Module({
+  providers: [QuotaService, RateLimiter],
+  exports: [QuotaService, RateLimiter],
+})
 export class QuotaModule {}

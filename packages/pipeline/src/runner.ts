@@ -23,6 +23,7 @@ import {
 import type { InventoryObject } from "@spatial/domain/object-verification";
 import type { RawSighting } from "@spatial/domain/landmarks";
 import { buildLayers, roomFootprint } from "@spatial/domain/scan-spatial";
+import { appMetrics, inSpan } from "@spatial/observability";
 import type { BlobStore } from "@spatial/storage";
 import type { CatalogSource } from "./catalog";
 import { applyConstraints } from "./constraints";
@@ -174,7 +175,14 @@ export async function runAnalysis(deps: AnalysisDeps, run: RunRef): Promise<Anal
       return done.data;
     }
     await progress(name);
-    const data = await produce();
+    const started = Date.now();
+    const data = await inSpan(`analysis.${name}`, produce, {
+      attributes: { "spatial.scan.id": run.scanId, "spatial.analysis.id": run.analysisId },
+    });
+    appMetrics().stageDuration.record((Date.now() - started) / 1000, {
+      stage: name,
+      provider: provider.kind,
+    });
     await store.saveCheckpoint(run.analysisId, name, { data, calls: newCalls() });
     return data;
   };

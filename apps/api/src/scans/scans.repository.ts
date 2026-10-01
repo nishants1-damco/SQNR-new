@@ -99,6 +99,7 @@ export class ScansRepository {
     userId: string,
     query: ScanListQuery,
     after: { value: string | number; id: string } | null,
+    executor: Executor = this.db,
   ): Promise<ListRow[]> {
     const sort = SORTS[query.sort];
     const where: SQL[] = [sql`s.user_id = ${userId}`];
@@ -114,7 +115,7 @@ export class ScansRepository {
         sql`(${sort.key}, s.id) ${sql.raw(sort.after)} (${String(after.value)}::${sql.raw(sort.type)}, ${after.id}::uuid)`,
       );
     }
-    const { rows } = await this.db.execute<ListRow>(sql`
+    const { rows } = await executor.execute<ListRow>(sql`
       SELECT s.id, s.name, s.status,
         s.width_m::float8 AS width_m, s.length_m::float8 AS length_m, s.height_m::float8 AS height_m,
         s.floor_area_m2::float8 AS floor_area_m2, s.site_address, s.ai_summary,
@@ -133,8 +134,11 @@ export class ScansRepository {
     return rows;
   }
 
-  async totals(userId: string): Promise<{ count: number; floorAreaM2: number }> {
-    const { rows } = await this.db.execute<{ count: number; area: number }>(sql`
+  async totals(
+    userId: string,
+    executor: Executor = this.db,
+  ): Promise<{ count: number; floorAreaM2: number }> {
+    const { rows } = await executor.execute<{ count: number; area: number }>(sql`
       SELECT count(*)::int AS count, coalesce(sum(floor_area_m2), 0)::float8 AS area
       FROM scans WHERE user_id = ${userId}`);
     return { count: rows[0]?.count ?? 0, floorAreaM2: rows[0]?.area ?? 0 };
@@ -153,21 +157,31 @@ export class ScansRepository {
     return scan;
   }
 
-  /** Child rows for the detail view. Only call after requireOwned/scanJson. */
-  async children(scanId: string) {
-    const rowsOf = async (table: SQL, order: SQL) =>
-      (
-        await this.db.execute<{ row: Row }>(
-          sql`SELECT to_jsonb(t) AS row FROM ${table} t WHERE t.scan_id = ${scanId} ORDER BY ${order}`,
-        )
-      ).rows.map((r) => r.row);
-    const [objects, portals, surfaces, photos] = await Promise.all([
-      rowsOf(sql`scan_objects`, sql`t.created_at, t.id`),
-      rowsOf(sql`scan_portals`, sql`t.created_at, t.id`),
-      rowsOf(sql`scan_surfaces`, sql`t.created_at, t.id`),
-      rowsOf(sql`scan_photos`, sql`t.idx, t.id`),
-    ]);
-    return { objects, portals, surfaces, photos };
+  /**
+   * The scan and its child rows for the detail view, in one statement: one
+   * connection and one round trip per request (load testing showed four
+   * parallel queries per request exhausting the pool, plan §18.1).
+   */
+  async detail(userId: string, scanId: string, executor: Executor = this.db) {
+    const children = (table: SQL, order: SQL) =>
+      sql`(SELECT coalesce(jsonb_agg(to_jsonb(t) ORDER BY ${order}), '[]'::jsonb)
+           FROM ${table} t WHERE t.scan_id = s.id)`;
+    const { rows } = await executor.execute<{
+      scan: ScanRecord;
+      objects: Row[];
+      portals: Row[];
+      surfaces: Row[];
+      photos: Row[];
+    }>(sql`
+      SELECT ${SCAN_JSON} AS scan,
+        ${children(sql`scan_objects`, sql`t.created_at, t.id`)} AS objects,
+        ${children(sql`scan_portals`, sql`t.created_at, t.id`)} AS portals,
+        ${children(sql`scan_surfaces`, sql`t.created_at, t.id`)} AS surfaces,
+        ${children(sql`scan_photos`, sql`t.idx, t.id`)} AS photos
+      FROM scans s WHERE s.id = ${scanId} AND s.user_id = ${userId}`);
+    const row = rows[0];
+    if (!row) throw ApiError.notFound("Space not found");
+    return row;
   }
 
   /** Inserts a scan; with a capture id already used by this user, returns that scan instead. */

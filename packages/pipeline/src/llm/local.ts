@@ -2,10 +2,12 @@
 // `/chat/completions` endpoint (Ollama serving Qwen2.5-VL in development),
 // streamed. Ported from `callOllama` in `src/lib/scan-analysis.server.ts`.
 // Development and CI only (decision D12).
+import { recordCallMetrics } from "./claude";
 import { withoutCacheMarkers, estimateInputTokens } from "./content";
 import { LlmError } from "./errors";
 import type { LlmGate } from "./gate";
 import { LOCAL_BUDGETS, type LlmProvider, type LlmRequest } from "./types";
+import type { LlmCall } from "./usage";
 
 export interface LocalProviderOptions {
   /** e.g. `http://127.0.0.1:11434/v1` */
@@ -36,8 +38,8 @@ export class LocalOpenAICompatProvider implements LlmProvider {
       outputTokens: 0,
     });
     const started = Date.now();
-    const record = (ok: boolean) =>
-      request.record?.({
+    const record = (ok: boolean) => {
+      const call: LlmCall = {
         step: request.step,
         provider: "ollama",
         model: request.model,
@@ -50,7 +52,10 @@ export class LocalOpenAICompatProvider implements LlmProvider {
         cache_creation_input_tokens: 0,
         stop_reason: null,
         ok,
-      });
+      };
+      request.record?.(call);
+      recordCallMetrics(call);
+    };
     try {
       const content = await this.stream(request);
       record(true);

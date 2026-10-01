@@ -4,7 +4,7 @@ Tracks what has moved from the original app into this repo, what changed on the 
 
 **Source:** the Lovable-connected Spatial Capture repo, branch `develop`, commit `12ad87b`. Code is copied, not moved: the source repo keeps running production until cutover (plan §17, phase 6).
 
-> The source repo also has **uncommitted** web-side changes (three decay chirps per auto-scan viewpoint in `src/routes/capture.tsx`, `combineViewpointProbes` in `src/lib/acoustics.ts` plus `src/lib/acoustics.test.ts`). They are browser code and are not part of phase 0. Take them from the source repo when `apps/web` is built in phase 4.
+> The web app (routes, components, hooks, browser libraries, and the source repo's uncommitted capture changes) moved to its own repo, [SQNR-web](https://github.com/nishants1-damco/SQNR-web), in phase 4. Its ledger is `docs/porting-ledger.md` there.
 
 ## Phase 0 — ported
 
@@ -125,10 +125,13 @@ Not ported as tests: `space-deletion.test.ts` and `rate-limit.test.ts` mocked th
 
 New tests: Claude request rules, refusal and served-model handling, cache markers, error classes, the Redis LLM gate (5), the checkpointed runner against a real database (resume after failure, lost ownership, no frames, privacy purge), worker jobs end to end (success with SSE events, permanent failure, retry with resume, stalled sweep, privacy sweep), and the API endpoints (9, plus 4 tenant-isolation routes).
 
+## Phase 5 — new, nothing ported
+
+Hardening and scale had no counterpart in the original app, apart from its quota function, whose Postgres version is kept behind `QUOTA_BACKEND=postgres`. Account deletion (`DELETE /v1/me`) is new: the original app had none (plan §16.3). See the migration plan's Phase 5 "As built" section and `docs/security-review.md`.
+
 ## Waiting for later phases
 
-| Phase    | Target           | Source                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                       |
-| -------- | ---------------- | ------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------ |
-| 3 (open) | `tools/eval`     | Real captures as eval fixtures (none exist yet), then the Opus 5.5 effort sweep and the prompt-caching experiment. `scripts/embed-catalog.ts` and `upload-catalog-image.ts` (re-embed the catalog and move its images into Blob Storage)                                                                                                                                                                                                                                                                     |
-| 4        | `apps/web`       | `src/routes/*`, `src/components/*`, `src/hooks/*`, browser libs (`acoustics` + test, importing `volumeFromRt60` from `@spatial/domain/room-acoustics`, `slam`, `capture-draft`, `capture-id`, `frame-quality`, `floor-plan-export`, `depth-import`, `pwa-install`, `theme`, `camera-lens`, `capture-perf`, `utils`, `version`, `error-capture`, `error-page`, and `logger` for browser logging; the server side uses pino, plan §7.1). Remaining test: `verification-and-capture.test.ts` (frame quality: 2) |
-| —        | Not carried over | `src/integrations/supabase/*`, `@lovable.dev/*` config and error reporting, Nitro / Cloudflare build, `scripts/audit-rls.ts` (no RLS; the tenant-isolation suite replaces it)                                                                                                                                                                                                                                                                                                                                |
+| Phase    | Target           | Source                                                                                                                                                                                                                                   |
+| -------- | ---------------- | ---------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
+| 3 (open) | `tools/eval`     | Real captures as eval fixtures (none exist yet), then the Opus 5.5 effort sweep and the prompt-caching experiment. `scripts/embed-catalog.ts` and `upload-catalog-image.ts` (re-embed the catalog and move its images into Blob Storage) |
+| —        | Not carried over | `src/integrations/supabase/*`, `@lovable.dev/*` config and error reporting, Nitro / Cloudflare build, `scripts/audit-rls.ts` (no RLS; the tenant-isolation suite replaces it)                                                            |

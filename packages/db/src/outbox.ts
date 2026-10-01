@@ -1,8 +1,12 @@
 // Transactional outbox (migration plan §7.4). Write messages with the same
 // transaction (or db handle) as the change they describe; the worker relays
 // them to the job queue after commit.
+import { context, propagation } from "@opentelemetry/api";
 import { outbox } from "./schema";
 import type { Database, Transaction } from "./client";
+
+/** Payload key holding the W3C trace context of the request that wrote the message. */
+export const OUTBOX_TRACE_KEY = "_trace";
 
 export const OUTBOX_TOPICS = {
   /** Delete specific blob keys. */
@@ -51,5 +55,12 @@ export async function enqueueOutbox(
     (m) => m.topic !== OUTBOX_TOPICS.blobDelete || m.payload.keys.length > 0,
   );
   if (rows.length === 0) return;
-  await db.insert(outbox).values(rows.map((m) => ({ topic: m.topic, payload: { ...m.payload } })));
+  // The request's trace context travels with the job, so the worker's span
+  // continues the same trace (plan §16.1). Empty when not tracing.
+  const trace: Record<string, string> = {};
+  propagation.inject(context.active(), trace);
+  const traced = Object.keys(trace).length ? { [OUTBOX_TRACE_KEY]: trace } : {};
+  await db
+    .insert(outbox)
+    .values(rows.map((m) => ({ topic: m.topic, payload: { ...m.payload, ...traced } })));
 }

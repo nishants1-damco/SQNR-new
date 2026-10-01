@@ -6,6 +6,7 @@ import { ClaudeProvider } from "./claude";
 import { LlmError } from "./errors";
 import type { LlmGate } from "./gate";
 import { LocalOpenAICompatProvider } from "./local";
+import { StubProvider } from "./stub";
 import type { LlmProvider, ProviderKind } from "./types";
 
 export interface LlmSettings {
@@ -21,6 +22,8 @@ export interface LlmSettings {
     baseUrl: string;
     model: string;
   };
+  /** Load tests: a stand-in for Claude (see stub.ts). Never in production. */
+  stub?: { latencyMs: number; rateLimitRate: number } | null;
 }
 
 export class ProviderFactory {
@@ -42,6 +45,13 @@ export class ProviderFactory {
         baseUrl: this.settings.local.baseUrl,
         model: model ?? this.settings.local.model,
         gate: this.gate,
+      });
+    }
+    if (this.settings.stub) {
+      return new StubProvider({
+        model: model ?? this.settings.anthropic.model,
+        gate: this.gate,
+        ...this.settings.stub,
       });
     }
     const { apiKey } = this.settings.anthropic;

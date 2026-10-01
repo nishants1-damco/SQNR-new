@@ -121,6 +121,7 @@ export class WorkerModule {
                   baseUrl: config.llm.localBaseUrl,
                   model: config.llm.models.ollama,
                 },
+                stub: config.llmStub,
               },
               gate,
               logger,
